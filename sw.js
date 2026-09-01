@@ -3,7 +3,7 @@
 // (2) cache app shell để mở lại nhanh / có thể dùng offline cơ bản.
 // KHÔNG can thiệp vào logic app — chỉ cache tĩnh ở cấp network.
 
-const CACHE_NAME = "giabao-os-v1";
+const CACHE_NAME = "giabao-os-v2";
 const APP_SHELL = ["./", "./index.html", "./manifest.json"];
 
 self.addEventListener("install", (event) => {
