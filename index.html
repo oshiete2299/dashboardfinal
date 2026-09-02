@@ -18053,6 +18053,28 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
       const DIGITAL_ACTIVITY_INDEX_KEY = "v1:digitalActivity:index",
         digitalActivityDayKey = (dateIso) => `v1:digitalActivity:day:${dateIso}`;
 
+      // PR-DQC-02: câu lệnh chuẩn để dán cho DeepSeek/Gemini/ChatGPT bên
+      // ngoài khi đọc ảnh Digital Wellbeing — viết khớp CHÍNH XÁC với các
+      // nhãn mà parseDigitalActivityText() ở trên tìm (regex tiếng Việt có
+      // dấu: "Ngày:", "Tổng thời gian:", "Mở khóa:", "Thông báo:", "Buổi
+      // sáng/chiều/tối:", và dòng "Tên app - Xh Yphút"). Đổi nhãn ở đây thì
+      // PHẢI đổi regex tương ứng ở parseDigitalActivityText(), không được
+      // lệch nhau.
+      const DIGITAL_ACTIVITY_AI_PROMPT =
+        "Đây là ảnh chụp màn hình Digital Wellbeing (Android) của tôi. Đọc kỹ ảnh và trả lời DUY NHẤT một đoạn văn bản theo ĐÚNG định dạng dưới đây (giữ nguyên tên nhãn, mỗi ý một dòng, không thêm giải thích, không thêm markdown, không thêm ký hiệu * hay #):\n\n" +
+        "Ngày: [ngày trên ảnh, dạng DD/MM/YYYY]\n" +
+        "Tổng thời gian: [số giờ số phút, ví dụ 5 giờ 20 phút]\n" +
+        "Mở khóa: [số lần]\n" +
+        "Thông báo: [số lượng]\n" +
+        "Buổi sáng: [số giờ số phút nếu ảnh có chia theo buổi, bỏ dòng này nếu không có]\n" +
+        "Buổi chiều: [số giờ số phút nếu có, bỏ dòng này nếu không có]\n" +
+        "Buổi tối: [số giờ số phút nếu có, bỏ dòng này nếu không có]\n\n" +
+        "Danh sách ứng dụng (mỗi dòng 1 app, sắp theo thời gian giảm dần, giữ tên app viết liền không dấu gạch đầu dòng số thứ tự):\n" +
+        "Tên app - số giờ số phút\n" +
+        "Tên app - số giờ số phút\n" +
+        "...\n\n" +
+        "Chỉ điền dòng nào ảnh thực sự có số liệu rõ ràng. Nếu ảnh không có thông tin nào đó thì bỏ hẳn dòng đó, không bịa số.";
+
       /* ---------- Parser helpers ---------- */
 
       // "2 giờ 15 phút", "2h15", "1h", "45 phút", "45m", "95 phút" -> số phút.
@@ -19017,6 +19039,804 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           await new Promise((resolve) => setTimeout(resolve, GEMINI_RPM_RETRY_WAIT_MS));
           return callGeminiFreeEventsExtract(apiKey, freeText, true);
         }
+      }
+
+      /* ======================================================================
+   DAILY QUICK CAPTURE (PR-DQC-01) — additive-only.
+   Ô nhập tự do 1 lần/ngày trên Dashboard: Bảo dán/gõ tự nhiên, Gemini phân
+   tích ra Preview có cấu trúc, Bảo Confirm mới ghi dữ liệu. Không sửa bất
+   kỳ hàm/field nào đã có — chỉ ĐỌC props.data (day record hiện tại của
+   Today) và ghi qua props.save (= saveDayData, hàm merge-patch đã có sẵn),
+   đúng field đã tồn tại trong blank() (journal/custom/mood/studyTime/
+   phone/quickLogs) — không thêm field mới vào schema dayDatabase.
+   Ideas/Waiting-Follow-up là 2 khái niệm CHƯA có trong app — lưu ở storage
+   key riêng (v1:dqc:*), tách biệt hoàn toàn khỏi dayDatabase/"d:"+iso, để
+   không đụng schema blank() hiện có. Mọi thay đổi được ghi vào
+   DQC Activity Log riêng (v1:dqc:activityLog) kèm snapshot before/after,
+   hỗ trợ Hoàn tác 1 lần cho lần Confirm gần nhất.
+   ====================================================================== */
+      const DQC_IDEAS_STORAGE_KEY = "v1:dqc:ideas",
+        DQC_WAITING_STORAGE_KEY = "v1:dqc:waiting",
+        DQC_ACTIVITY_LOG_STORAGE_KEY = "v1:dqc:activityLog",
+        DQC_ACTIVITY_LOG_MAX = 50,
+        DQC_INPUT_MAX_LEN = 4000;
+
+      // PR-DQC-02: câu lệnh chuẩn để dán cho DeepSeek/Gemini/ChatGPT bên
+      // ngoài khi nhờ tóm tắt ngày hôm nay (kèm ảnh nếu có) — viết dưới
+      // dạng free text tự nhiên vì buildDqcSystemPrompt() ở trên đọc văn
+      // bản tự do, KHÔNG cần format cứng như DIGITAL_ACTIVITY_AI_PROMPT.
+      // Mục đích chỉ để đảm bảo AI ngoài trả đủ ý mà Gemini nội bộ có thể
+      // trích xuất (hoàn thành/đang làm/mới/ý tưởng/theo dõi/deadline/
+      // priority/work time/phone/mood/habit).
+      const DQC_AI_PROMPT =
+        'Dựa vào những gì tôi vừa kể/gửi cho bạn (có thể kèm ảnh) về ngày hôm nay của tôi, hãy viết lại thành MỘT đoạn văn bản tự nhiên bằng tiếng Việt (không dùng markdown, không dùng bullet *, không đánh số, viết như đang kể chuyện bình thường) bao gồm càng đầy đủ càng tốt các ý sau, chỉ viết ý nào bạn thực sự có thông tin, không suy đoán hay bịa thêm:\n\n' +
+        "- Những việc tôi đã làm xong hôm nay (nói rõ tên việc)\n" +
+        "- Những việc tôi đang làm dở, chưa xong\n" +
+        "- Việc mới phát sinh hôm nay mà trước đó chưa có\n" +
+        "- Ý tưởng tôi nhắc tới (nếu có)\n" +
+        "- Việc gì tôi đang chờ/đợi phản hồi từ ai đó (nếu có)\n" +
+        '- Deadline hoặc mốc thời gian tôi nhắc tới, càng cụ thể càng tốt (ngày cụ thể, "mai", "cuối tuần", "thứ mấy"...)\n' +
+        "- Mức độ khẩn cấp/ưu tiên nếu tôi có nhắc\n" +
+        "- Tôi đã làm việc/học khoảng bao nhiêu tiếng (nếu tôi có nói)\n" +
+        "- Tôi dùng điện thoại khoảng bao nhiêu tiếng hôm nay (nếu tôi có nói hoặc ảnh có cho thấy)\n" +
+        "- Tâm trạng của tôi hôm nay\n" +
+        "- Thói quen/hành động tôi lặp lại hôm nay (tập gym, đọc sách, học tiếng Anh...) nếu có\n\n" +
+        "Viết liền mạch như một đoạn nhật ký ngắn, không cần chia mục rõ ràng, không thêm lời mở đầu hay kết luận nào khác ngoài đoạn văn đó.";
+
+      async function getDqcIdeas() {
+        try {
+          return safeJSONParse(await S.get(DQC_IDEAS_STORAGE_KEY), []) || [];
+        } catch {
+          return [];
+        }
+      }
+      async function saveDqcIdeas(list) {
+        try {
+          await S.set(DQC_IDEAS_STORAGE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+        } catch {}
+      }
+      async function getDqcWaiting() {
+        try {
+          return safeJSONParse(await S.get(DQC_WAITING_STORAGE_KEY), []) || [];
+        } catch {
+          return [];
+        }
+      }
+      async function saveDqcWaiting(list) {
+        try {
+          await S.set(DQC_WAITING_STORAGE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+        } catch {}
+      }
+      async function getDqcActivityLog() {
+        try {
+          return safeJSONParse(await S.get(DQC_ACTIVITY_LOG_STORAGE_KEY), []) || [];
+        } catch {
+          return [];
+        }
+      }
+      async function pushDqcActivityLog(entry) {
+        try {
+          const list = await getDqcActivityLog();
+          list.push(entry);
+          while (list.length > DQC_ACTIVITY_LOG_MAX) list.shift();
+          await S.set(DQC_ACTIVITY_LOG_STORAGE_KEY, JSON.stringify(list));
+        } catch {}
+      }
+      // Xoá 1 entry log sau khi đã Hoàn tác thành công (không cho hoàn tác 2 lần).
+      async function removeDqcActivityLogEntry(id) {
+        try {
+          const list = await getDqcActivityLog();
+          await S.set(
+            DQC_ACTIVITY_LOG_STORAGE_KEY,
+            JSON.stringify(list.filter((e) => e.id !== id)),
+          );
+        } catch {}
+      }
+
+      function dqcSlugTitle(title) {
+        return String(title || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim();
+      }
+      // So khớp mờ với custom task đã có hôm nay — dùng lại nguyên tắc
+      // normalize đã có ở extractionFeedbackNormalizeForCompare (PR-FREETEXT-
+      // FEEDBACK) nhưng viết riêng bản rút gọn để module này độc lập, không
+      // phụ thuộc thứ tự khai báo với module kia.
+      function dqcFindMatchingCustomTask(customList, title) {
+        const target = dqcSlugTitle(title);
+        if (!target) return null;
+        const list = Array.isArray(customList) ? customList : [];
+        return (
+          list.find((t) => dqcSlugTitle(t.title) === target) ||
+          list.find((t) => {
+            const s = dqcSlugTitle(t.title);
+            return s && (s.includes(target) || target.includes(s));
+          }) ||
+          null
+        );
+      }
+
+      // PR-DQC-BACKFILL: nhận thêm todayIso (ISO ngày hiện tại thật, ví dụ
+      // "2026-09-02") để Gemini có mốc quy chiếu khi suy luận "hôm qua",
+      // "tuần trước", "15/08"... KHÔNG đổi hành vi các field cũ, chỉ thêm
+      // mô tả field detectedDate/dateConfidence mới trong schema.
+      function buildDqcSystemPrompt(existingTaskTitles, todayIso) {
+        const taskListStr =
+          Array.isArray(existingTaskTitles) && existingTaskTitles.length
+            ? existingTaskTitles.map((t) => `- ${t}`).join("\n")
+            : "(chưa có task nào hôm nay)";
+        return (
+          "Bạn phân tích một đoạn nhật ký/tóm tắt tự do (tiếng Việt, đôi khi dán từ AI khác) mà học sinh vừa viết, rồi trích xuất dữ liệu có cấu trúc. Đoạn văn có thể nói về HÔM NAY hoặc về MỘT NGÀY KHÁC trong quá khứ (hôm qua, tuần trước, tháng trước, hoặc 1 ngày cụ thể).\n\n" +
+          "HÔM NAY (mốc quy chiếu thật, dùng để tính 'hôm qua'/'tuần trước'/thứ trong tuần...): " + todayIso + "\n\n" +
+          "DANH SÁCH TASK HÔM NAY ĐÃ CÓ (so khớp trước khi tạo task mới, dùng ĐÚNG title trong danh sách nếu khớp ý nghĩa, kể cả khi cách diễn đạt khác — CHỈ áp dụng nếu dữ liệu là của hôm nay):\n" +
+          taskListStr +
+          "\n\n" +
+          "QUY TẮC BẮT BUỘC:\n" +
+          "- KHÔNG suy diễn hay bịa thông tin không có trong đoạn văn. Nếu không chắc chắn, để field đó trống/mảng rỗng thay vì đoán.\n" +
+          "- Với mỗi việc nhắc tới: xác định đã HOÀN THÀNH hay ĐANG LÀM. Nếu tên việc khớp (dù không giống hệt chữ) với 1 task trong danh sách đã có, dùng matchedExistingTitle = đúng title đó; nếu là việc hoàn toàn mới, để matchedExistingTitle = null.\n" +
+          "- confidence (0-1) cho MỖI item — dưới 0.6 vẫn đưa vào preview nhưng đánh dấu lowConfidence=true để người dùng tự soát lại, không tự ý bỏ qua.\n" +
+          "- deadline: chỉ suy luận khi có tín hiệu rõ (ngày cụ thể, 'mai', 'cuối tuần', 'thứ X', 'tuần sau') — trả về text gần nguyên văn + isoDateGuess nếu tính được, để null nếu mơ hồ.\n" +
+          "- priority: low/medium/high/critical — chỉ set khi có tín hiệu hợp lý (deadline gần, ngôn từ khẩn cấp); mặc định null nếu không rõ.\n" +
+          "- workTimeMinutes/phoneUsageMinutes: chỉ điền khi có con số hoặc khoảng thời gian rõ ràng trong văn bản (vd 'khoảng 3 tiếng' -> 180). Không suy luận từ ngữ cảnh.\n" +
+          "- mood: 1 từ/cụm ngắn tiếng Việt mô tả tâm trạng nếu có nhắc tới (vd 'Mệt', 'Khá vui', 'Stress', 'Tập trung'), null nếu không có.\n" +
+          "- habits: chỉ liệt kê hành động có tính LẶP LẠI rõ ràng theo ngữ cảnh (tập gym, đọc sách, học tiếng Anh...), không liệt kê việc một lần.\n" +
+          "- detectedDate: NẾU đoạn văn có tín hiệu rõ về ngày dữ liệu thuộc về (vd 'hôm qua', 'ngày 12/09/2026', 'thứ 3 tuần trước', 'đây là nhật ký ngày 15/08') thì TÍNH RA đúng ngày ISO (YYYY-MM-DD) dựa trên mốc HÔM NAY ở trên, gán vào detectedDate. Nếu KHÔNG có tín hiệu gì về ngày (mặc định coi là hôm nay), để detectedDate = null.\n" +
+          "- dateConfidence (0-1): độ chắc chắn của detectedDate — chỉ cao (>0.7) khi tín hiệu ngày RÕ RÀNG, KHÔNG suy đoán mơ hồ. Nếu detectedDate = null thì dateConfidence = 0.\n" +
+          "- Luôn trả JSON đúng schema, không thêm chữ nào ngoài JSON."
+        );
+      }
+
+      function dqcResponseSchema() {
+        const itemSchema = {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING" },
+            matchedExistingTitle: { type: "STRING", nullable: true },
+            confidence: { type: "NUMBER" },
+            lowConfidence: { type: "BOOLEAN" },
+          },
+          required: ["title", "confidence", "lowConfidence"],
+        };
+        return {
+          type: "OBJECT",
+          properties: {
+            completed: { type: "ARRAY", items: itemSchema },
+            inProgress: { type: "ARRAY", items: itemSchema },
+            newTasks: { type: "ARRAY", items: itemSchema },
+            ideas: { type: "ARRAY", items: { type: "STRING" } },
+            waiting: { type: "ARRAY", items: { type: "STRING" } },
+            habits: { type: "ARRAY", items: { type: "STRING" } },
+            deadlines: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  taskTitle: { type: "STRING" },
+                  text: { type: "STRING" },
+                  isoDateGuess: { type: "STRING", nullable: true },
+                },
+                required: ["taskTitle", "text"],
+              },
+            },
+            priority: { type: "STRING", nullable: true },
+            workTimeMinutes: { type: "NUMBER", nullable: true },
+            phoneUsageMinutes: { type: "NUMBER", nullable: true },
+            mood: { type: "STRING", nullable: true },
+            aiSummary: { type: "STRING" },
+            // PR-DQC-BACKFILL: ngày dữ liệu AI suy ra được (YYYY-MM-DD) +
+            // độ tin cậy — null/0 nếu không có tín hiệu (mặc định hôm nay).
+            detectedDate: { type: "STRING", nullable: true },
+            dateConfidence: { type: "NUMBER", nullable: true },
+          },
+          required: ["completed", "inProgress", "newTasks", "ideas", "waiting", "habits", "deadlines", "aiSummary"],
+        };
+      }
+
+      async function doCallGeminiDailyQuickCapture(apiKey, freeText, existingTaskTitles) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_MID}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          body = {
+            system_instruction: {
+              parts: [{ text: buildDqcSystemPrompt(existingTaskTitles, getLocalDateKey(new Date())) }],
+            },
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: String(freeText || "").slice(0, DQC_INPUT_MAX_LEN) }],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.2,
+              response_mime_type: "application/json",
+              response_schema: dqcResponseSchema(),
+            },
+          },
+          // Cùng pattern doCallGeminiFreeEventsExtract: timeout riêng + đánh
+          // dấu retryable cho timeout/429/503/500.
+          res = await fetchWithTimeout(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            },
+            45000,
+          ).catch((fetchErr) => {
+            if (/^Gemini API timeout/.test(fetchErr?.message || "")) {
+              fetchErr.isRetryableRpm = true;
+              fetchErr.isServerUnavailable = true;
+            }
+            throw fetchErr;
+          });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          if (429 === res.status || 503 === res.status || 500 === res.status) {
+            const retryErr = new Error(`Gemini API lỗi (${res.status}): ${errText.slice(0, 200)}`);
+            retryErr.isRetryableRpm = true;
+            throw retryErr;
+          }
+          throw new Error(`Gemini API lỗi (${res.status}): ${errText.slice(0, 200)}`);
+        }
+        const data = await res.json(),
+          text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Gemini không trả về nội dung hợp lệ.");
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new Error("Gemini trả JSON không hợp lệ khi phân tích Quick Capture.");
+        }
+        return parsed;
+      }
+
+      async function callGeminiDailyQuickCapture(apiKey, freeText, existingTaskTitles, isRetry) {
+        try {
+          return await doCallGeminiDailyQuickCapture(apiKey, freeText, existingTaskTitles);
+        } catch (err) {
+          if (isRetry || !err?.isRetryableRpm) throw err;
+          await new Promise((resolve) => setTimeout(resolve, GEMINI_RPM_RETRY_WAIT_MS));
+          return callGeminiDailyQuickCapture(apiKey, freeText, existingTaskTitles, true);
+        }
+      }
+
+      // PR-DQC-BACKFILL: đọc record của MỘT NGÀY BẤT KỲ từ storage (key
+      // "d:" + dateIso), KHÔNG phụ thuộc dayDatabase React state (vốn chỉ
+      // giữ ngày hiện tại đầy đủ trong props.data). Cùng pattern đã có ở
+      // saveDigitalActivityDay (dòng ~18339) — parse an toàn, fallback
+      // blank() nếu chưa có record cho ngày đó.
+      async function getDayRecordForDate(dateIso) {
+        try {
+          const raw = await S.get("d:" + dateIso);
+          if (!raw || raw === "null") return blank();
+          return safeJSONParse(raw, blank());
+        } catch {
+          return blank();
+        }
+      }
+
+      // PR-DQC-MERGE: kiểm tra NHẸ (không ghi gì) xem ngày dateIso đã có dữ
+      // liệu gì chưa — dùng ở UI Preview NGAY SAU KHI targetDate được xác
+      // định (AI detect hoặc Bảo tự đổi Date Picker), để: (1) hiện cảnh báo
+      // "Ngày này đã có dữ liệu...", (2) quyết định có cần hiện toggle
+      // Keep/Replace cho Mood/Phone hay không (chỉ hiện khi field đó thực
+      // sự đã có giá trị — theo đúng yêu cầu). Coi "hasAnyData" = true nếu
+      // có bất kỳ tín hiệu ghi tay/import nào (custom/journal/quickLogs
+      // không rỗng, hoặc mood/phone đã có giá trị).
+      async function dqcCheckExistingDayData(dateIso) {
+        try {
+          const rec = await getDayRecordForDate(dateIso),
+            hasMood = !!(
+              rec.mood &&
+              (rec.mood.morning || rec.mood.noon || rec.mood.afternoon || rec.mood.night)
+            ),
+            hasPhone = Number(rec.phone) > 0,
+            hasAnyData =
+              hasMood ||
+              hasPhone ||
+              !!(rec.journal && rec.journal.trim()) ||
+              (Array.isArray(rec.custom) && rec.custom.length > 0) ||
+              (Array.isArray(rec.quickLogs) && rec.quickLogs.length > 0) ||
+              Number(rec.studyTime) > 0;
+          return { hasAnyData, hasMood, hasPhone };
+        } catch {
+          return { hasAnyData: false, hasMood: false, hasPhone: false };
+        }
+      }
+
+      // Áp dụng preview đã được Bảo Confirm: ghi vào dayDatabase của
+      // targetDate (mặc định = td/hôm nay, nhưng có thể là bất kỳ ngày nào
+      // nếu Bảo đổi qua Date Picker trong Preview) — qua saveFn = props.save
+      // (saveDayData, vốn đã nhận dateKey làm tham số đầu, generic sẵn) +
+      // ideas/waiting riêng (gắn date: targetDate, không phải ngày Import).
+      // Trả về { beforeSnapshot, afterSnapshot } để ghi Activity Log/Undo.
+      // PR-DQC-MERGE: thêm 2 tham số optional moodStrategy/phoneStrategy
+      // ("replace" | "keep"), mặc định "replace" — GIỮ NGUYÊN hành vi cũ
+      // khi caller không truyền (additive). UI Preview đọc trước xem ngày
+      // effectiveDate đã có mood/phone chưa để hiện toggle Keep/Replace.
+      async function applyDqcPreview({
+        preview,
+        td,
+        targetDate,
+        todayData,
+        saveFn,
+        moodStrategy = "replace",
+        phoneStrategy = "replace",
+      }) {
+        // targetDate mặc định = td để giữ nguyên hành vi cũ khi caller cũ
+        // không truyền (additive, không phá API hiện có).
+        const effectiveDate = targetDate || td,
+          isBackfill = effectiveDate !== td,
+          // Nếu ghi cho hôm nay: dùng thẳng todayData đã có sẵn trong props
+          // (tránh 1 lượt đọc storage thừa, giữ nguyên hành vi cũ). Nếu ghi
+          // cho ngày khác: PHẢI đọc đúng record của ngày đó, không được
+          // dùng nhầm todayData (dữ liệu hôm nay) làm nền cho ngày quá khứ.
+          dayData = isBackfill ? await getDayRecordForDate(effectiveDate) : todayData,
+          before = {
+            custom: Array.isArray(dayData.custom) ? [...dayData.custom] : [],
+            journal: dayData.journal || "",
+            mood: { ...(dayData.mood || {}) },
+            studyTime: dayData.studyTime || 0,
+            phone: dayData.phone || 0,
+            quickLogs: Array.isArray(dayData.quickLogs) ? [...dayData.quickLogs] : [],
+          },
+          ideasBefore = await getDqcIdeas(),
+          waitingBefore = await getDqcWaiting();
+
+        let customList = [...before.custom];
+        const now = Date.now();
+        // PR-DQC-REPORT: ghi lại CHÍNH XÁC những gì xảy ra với từng task
+        // ngay tại thời điểm xử lý (không suy đoán lại sau bằng cách so
+        // sánh length) — dùng cho Import Report ở #5/#19. taskReport theo
+        // đúng phân loại report yêu cầu: newlyCreated / completedNow /
+        // matchedExisting / skippedDuplicate.
+        const taskReport = { newlyCreated: [], completedNow: [], matchedExisting: [], skippedDuplicate: [] };
+        const upsertTask = (item, done) => {
+          const matched =
+            (item.matchedExistingTitle && dqcFindMatchingCustomTask(customList, item.matchedExistingTitle)) ||
+            dqcFindMatchingCustomTask(customList, item.title);
+          if (matched) {
+            customList = customList.map((t) => (t.id === matched.id ? { ...t, done: done } : t));
+            if (done && !matched.done) {
+              taskReport.completedNow.push({ title: item.title, matchedExistingTitle: matched.title });
+            } else {
+              taskReport.matchedExisting.push({ title: item.title, matchedExistingTitle: matched.title });
+            }
+          } else {
+            customList.push({
+              id: "dqc_" + now + "_" + Math.random().toString(36).slice(2, 8),
+              title: item.title,
+              done: done,
+              source: "dqc",
+            });
+            taskReport.newlyCreated.push({ title: item.title, done: done });
+          }
+        };
+        (preview.completed || []).forEach((item) => upsertTask(item, true));
+        (preview.inProgress || []).forEach((item) => upsertTask(item, false));
+        (preview.newTasks || []).forEach((item) => {
+          if (!dqcFindMatchingCustomTask(customList, item.title)) upsertTask(item, false);
+          else taskReport.skippedDuplicate.push({ title: item.title, reason: "đã tồn tại" });
+        });
+
+        // Slot mood theo giờ hiện tại — chỉ chính xác khi ghi cho hôm nay.
+        // Khi backfill ngày quá khứ, không có cách suy giờ-trong-ngày từ
+        // free text nên vẫn dùng slot theo giờ Import làm xấp xỉ hợp lý
+        // nhất hiện có (không bịa slot khác không có căn cứ).
+        // PR-DQC-MERGE: chỉ ghi đè slot mood khi moodStrategy = "replace"
+        // (mặc định, giữ nguyên hành vi cũ) HOẶC slot đó CHƯA có giá trị.
+        // moodStrategy = "keep" → giữ nguyên toàn bộ mood cũ của ngày đó.
+        const currentSlot = (() => {
+            const hr = new Date().getHours();
+            return hr < 11 ? "morning" : hr < 14 ? "noon" : hr < 18 ? "afternoon" : "night";
+          })(),
+          slotHasExisting = !!before.mood?.[currentSlot],
+          nextMood =
+            preview.mood && (moodStrategy === "replace" || !slotHasExisting)
+              ? { ...before.mood, [currentSlot]: preview.mood }
+              : before.mood;
+
+        // Nhãn journal ghi rõ đây là Import cho ngày effectiveDate khi khác
+        // ngày Import thật (isBackfill), để không gây hiểu lầm mốc thời gian
+        // khi đọc lại journal của ngày đó.
+        const journalStamp = `\n\n[${isBackfill ? "Import (ghi nhanh) cho ngày " + effectiveDate : "Ghi nhanh " + new Date().toLocaleString("vi-VN")}]\n${preview.rawText || ""}${
+            preview.aiSummary ? `\n(Tóm tắt AI: ${preview.aiSummary})` : ""
+          }`,
+          nextJournal = (before.journal || "") + journalStamp;
+
+        const nextStudyTime =
+            Number.isFinite(Number(preview.workTimeMinutes)) && preview.workTimeMinutes > 0
+              ? before.studyTime + Number(preview.workTimeMinutes)
+              : before.studyTime,
+          // PR-DQC-MERGE: phoneStrategy = "keep" và ngày đó đã có phone > 0
+          // → giữ nguyên; mặc định "replace" giữ nguyên hành vi cũ.
+          phoneHasExisting = Number(before.phone) > 0,
+          nextPhone =
+            Number.isFinite(Number(preview.phoneUsageMinutes)) &&
+            preview.phoneUsageMinutes > 0 &&
+            (phoneStrategy === "replace" || !phoneHasExisting)
+              ? Number(preview.phoneUsageMinutes)
+              : before.phone;
+
+        const nextQuickLogs = preview.aiSummary
+          ? [
+              ...before.quickLogs,
+              {
+                id: "ql_dqc_" + now,
+                text: "📋 Quick Capture: " + preview.aiSummary,
+                createdAt: now,
+              },
+            ]
+          : before.quickLogs;
+
+        // saveFn = saveDayData(dateKey, patch) đã generic sẵn theo dateKey —
+        // ghi đúng effectiveDate (hôm nay hoặc ngày quá khứ Bảo chọn),
+        // KHÔNG hard-code td. Đây là điểm mấu chốt để #2 (ghi đúng ngày)
+        // và #4 (Dashboard tự tính lại qua SnapshotRuntime.markDirty() bên
+        // trong saveDayData) hoạt động cho mọi ngày, không riêng hôm nay.
+        await saveFn(effectiveDate, {
+          custom: customList,
+          journal: nextJournal,
+          mood: nextMood,
+          studyTime: nextStudyTime,
+          phone: nextPhone,
+          quickLogs: nextQuickLogs,
+        });
+
+        // PR-DQC-MERGE: dedupe Ideas/Waiting theo text đã chuẩn hoá (dùng lại
+        // dqcSlugTitle — cùng nguyên tắc so khớp mờ đã dùng cho Custom Tasks
+        // ở trên) — không tạo bản ghi trùng khi Import nhiều lần cho cùng 1
+        // ngày. Chỉ so trong phạm vi TOÀN BỘ list (ideas/waiting không tách
+        // theo ngày trong storage), đúng tinh thần "không trùng" của yêu cầu.
+        // PR-DQC-REPORT: track added/skipped TẠI THỜI ĐIỂM filter (không suy
+        // đoán từ length sau đó — đúng yêu cầu #19) cho Ideas/Waiting.
+        const ideasReport = { added: [], skippedDuplicate: [] },
+          waitingReport = { added: [], skippedDuplicate: [] };
+        const dqcIsDuplicateText = (list, text) => {
+            const target = dqcSlugTitle(text);
+            return !!target && list.some((it) => dqcSlugTitle(it.text) === target);
+          },
+          newIdeas = (preview.ideas || []).filter((text) => {
+            const dup = dqcIsDuplicateText(ideasBefore, text);
+            if (dup) ideasReport.skippedDuplicate.push({ text: text, reason: "đã tồn tại" });
+            else ideasReport.added.push({ text: text });
+            return !dup;
+          }),
+          ideasAfter = [
+            ...ideasBefore,
+            ...newIdeas.map((text) => ({
+              id: "idea_" + now + "_" + Math.random().toString(36).slice(2, 6),
+              text: text,
+              createdAt: now,
+              date: effectiveDate,
+            })),
+          ],
+          newWaiting = (preview.waiting || []).filter((text) => {
+            const dup = dqcIsDuplicateText(waitingBefore, text);
+            if (dup) waitingReport.skippedDuplicate.push({ text: text, reason: "đã tồn tại" });
+            else waitingReport.added.push({ text: text });
+            return !dup;
+          }),
+          waitingAfter = [
+            ...waitingBefore,
+            ...newWaiting.map((text) => ({
+              id: "wait_" + now + "_" + Math.random().toString(36).slice(2, 6),
+              text: text,
+              createdAt: now,
+              date: effectiveDate,
+              resolved: false,
+            })),
+          ];
+        if ((preview.ideas || []).length) await saveDqcIdeas(ideasAfter);
+        if ((preview.waiting || []).length) await saveDqcWaiting(waitingAfter);
+
+        // --- HABIT TRACKING ---------------------------------------------
+        // Không tạo list riêng: nối vào engine Habit Analytics đã có
+        // (Personal Task Library + Completion History), để streak/trend
+        // Bảo xem trong HabitAnalyticsModal tự nhiên bao gồm cả habit ghi
+        // qua Quick Capture. Tìm task đã có (so khớp mờ theo title); nếu
+        // chưa có thì tạo 1 Personal Task mới (controllable: true, đúng
+        // field Habit Analytics cần), rồi ghi 1 completion entry ĐÚNG NGÀY
+        // effectiveDate (completedAtOverride) — PR-DQC-BACKFILL: quan
+        // trọng để Streak/Completion Rate trong HabitAnalyticsModal không
+        // bị lệch về ngày Import khi ghi cho ngày quá khứ.
+        const habitTaskIdsCreated = [],
+          habitHistoryEntryIds = [],
+          // Giờ trong ngày không xác định được từ free text — dùng 12:00
+          // trưa của effectiveDate làm mốc completedAt hợp lý (tránh lệch
+          // sang ngày kế cận do timezone khi chỉ có 00:00), CHỈ áp dụng khi
+          // backfill; ghi hôm nay vẫn dùng thời điểm thật như cũ.
+          habitCompletedAtOverride = isBackfill ? effectiveDate + "T12:00:00.000Z" : null,
+          // PR-DQC-REPORT: report chi tiết cho #11 — phân biệt Personal Task
+          // mới tạo vs đã tồn tại, completion mới ghi vs bị skip do dedupe,
+          // và lỗi PER-ITEM (1 habit lỗi không được che mất các habit khác
+          // đã thành công — đúng yêu cầu #13).
+          habitReport = { newTaskCreated: [], existingTaskMatched: [], completionRecorded: [], skippedDuplicate: [], failed: [] };
+        if ((preview.habits || []).length) {
+          try {
+            const personalTasks = await getPersonalTasks(),
+              // PR-DQC-MERGE: đọc history 1 LẦN trước vòng lặp để check
+              // "ngày effectiveDate đã có completion cho task này chưa" —
+              // tránh completion trùng khi Import nhiều lần cùng ngày.
+              // completedAt so theo 10 ký tự đầu (YYYY-MM-DD), đúng cách
+              // computePersonalTaskStats() đã dùng (dòng ~23946) để tính
+              // Streak theo NGÀY, không theo timestamp chính xác.
+              existingHistory = await getPersonalTaskHistory();
+            for (const habitTitle of preview.habits) {
+              try {
+                const target = dqcSlugTitle(habitTitle);
+                if (!target) continue;
+                let match =
+                  personalTasks.find((t) => dqcSlugTitle(t.title) === target) ||
+                  personalTasks.find((t) => {
+                    const s = dqcSlugTitle(t.title);
+                    return s && (s.includes(target) || target.includes(s));
+                  });
+                if (!match) {
+                  match = await addPersonalTask({
+                    title: habitTitle,
+                    category: "habit",
+                    phase: "anytime",
+                    controllable: true,
+                    source: "dqc",
+                    completionRule: "Ghi nhận qua Daily Quick Capture.",
+                    icon: "🔁",
+                  });
+                  habitTaskIdsCreated.push(match.id);
+                  habitReport.newTaskCreated.push({ title: habitTitle });
+                } else {
+                  habitReport.existingTaskMatched.push({ title: habitTitle, matchedExistingTitle: match.title });
+                }
+                const alreadyDoneThatDay = existingHistory.some(
+                  (h) => h.taskId === match.id && !h.skipped && String(h.completedAt || "").slice(0, 10) === effectiveDate,
+                );
+                if (alreadyDoneThatDay) {
+                  habitReport.skippedDuplicate.push({ title: habitTitle, reason: "ngày này đã có completion" });
+                  continue; // đã có completion ngày này — không tạo trùng
+                }
+                const historyId = "dqc_hist_" + now + "_" + Math.random().toString(36).slice(2, 6);
+                await recordPersonalTaskCompletion({
+                  taskId: match.id,
+                  skipped: false,
+                  source: "quick_capture",
+                  completedAtOverride: habitCompletedAtOverride,
+                });
+                // Cập nhật bản nháp trong bộ nhớ để tránh trùng NGAY TRONG
+                // CÙNG 1 lượt Confirm nếu Gemini trả 2 habit trùng nhau.
+                existingHistory.push({ taskId: match.id, completedAt: habitCompletedAtOverride || new Date().toISOString(), skipped: false });
+                habitHistoryEntryIds.push({ taskId: match.id, approxTime: now });
+                habitReport.completionRecorded.push({ title: habitTitle, date: effectiveDate });
+              } catch (itemErr) {
+                console.error("[Daily Quick Capture] habit item failed:", habitTitle, itemErr);
+                habitReport.failed.push({ title: habitTitle, message: itemErr?.message || "Lỗi không xác định" });
+              }
+            }
+          } catch (e) {
+            console.error("[Daily Quick Capture] habit tracking failed:", e);
+            habitReport.failed.push({ title: null, message: e?.message || "Habit tracking thất bại toàn bộ" });
+          }
+        }
+
+        // --- DEADLINE ------------------------------------------------------
+        // Chỉ tạo Future Event khi Gemini suy được isoDateGuess hợp lệ
+        // (YYYY-MM-DD) — đúng yêu cầu "không suy diễn nếu không chắc".
+        // Deadline mơ hồ (không có isoDateGuess) vẫn hiển thị trong Preview
+        // dạng text nhưng KHÔNG tự tạo Future Event.
+        // PR-DQC-MERGE: trước khi tạo, check trùng title+date với Future
+        // Event đã tồn tại (kể cả event không do Quick Capture tạo) — đúng
+        // quy tắc "cùng tiêu đề + cùng ngày thì không tạo thêm".
+        const futureEventIdsCreated = [],
+          // PR-DQC-REPORT: report chi tiết #12 — dedupe vs tạo mới, + lỗi
+          // PER-ITEM (1 deadline lỗi không được che các deadline khác đã
+          // tạo thành công — #13).
+          futureEventReport = { created: [], skippedDuplicate: [], skippedNoDate: [], failed: [] };
+        if ((preview.deadlines || []).length) {
+          try {
+            const existingFutureEvents = await getFutureEvents(),
+              dqcIsDuplicateFutureEvent = (title, date) => {
+                const target = dqcSlugTitle(title);
+                return (
+                  !!target &&
+                  existingFutureEvents.some((e) => e.date === date && dqcSlugTitle(e.title) === target)
+                );
+              };
+            for (const dl of preview.deadlines) {
+              const evTitle = dl.taskTitle || dl.text;
+              if (!dl.isoDateGuess || !/^\d{4}-\d{2}-\d{2}$/.test(dl.isoDateGuess)) {
+                futureEventReport.skippedNoDate.push({ title: evTitle, reason: "ngày chưa rõ" });
+                continue;
+              }
+              if (dqcIsDuplicateFutureEvent(evTitle, dl.isoDateGuess)) {
+                futureEventReport.skippedDuplicate.push({
+                  title: evTitle,
+                  date: dl.isoDateGuess,
+                  reason: "đã có event cùng title + date",
+                });
+                continue;
+              }
+              try {
+                const priority = ["low", "medium", "high", "critical"].includes(preview.priority)
+                  ? preview.priority
+                  : "medium";
+                const saved = await saveFutureEvent({
+                  title: evTitle,
+                  type: "deadline",
+                  date: dl.isoDateGuess,
+                  priority: priority,
+                  description: dl.text,
+                  relationships: [
+                    {
+                      relationType: "quick_capture",
+                      entityKind: "note",
+                      label: dl.text,
+                      source: "ai_detected",
+                      confidence: null,
+                    },
+                  ],
+                  aiTracking: { eventConfidence: null },
+                });
+                if (saved?.id) {
+                  futureEventIdsCreated.push(saved.id);
+                  futureEventReport.created.push({ title: evTitle, date: dl.isoDateGuess, priority: priority });
+                } else {
+                  futureEventReport.failed.push({ title: evTitle, message: "Không thể lưu event" });
+                }
+              } catch (itemErr) {
+                console.error("[Daily Quick Capture] deadline item failed:", evTitle, itemErr);
+                futureEventReport.failed.push({ title: evTitle, message: itemErr?.message || "Không thể lưu event" });
+              }
+            }
+          } catch (e) {
+            console.error("[Daily Quick Capture] deadline creation failed:", e);
+            futureEventReport.failed.push({ title: null, message: e?.message || "Deadline creation thất bại toàn bộ" });
+          }
+        }
+
+        // PR-DQC-REPORT: Mood/Phone không cần dữ liệu mới — suy trực tiếp
+        // từ before/after/strategy đã có sẵn ở trên (KHÔNG suy đoán ngoài
+        // dữ liệu thực tế, chỉ đọc lại các biến đã tính) — đúng yêu cầu #9/#10.
+        const moodReport = !preview.mood
+            ? null
+            : !slotHasExisting
+              ? { action: "added", value: preview.mood }
+              : moodStrategy === "keep"
+                ? { action: "kept", current: before.mood?.[currentSlot], aiSuggested: preview.mood }
+                : { action: "replaced", previous: before.mood?.[currentSlot], next: preview.mood },
+          phoneReport =
+            !Number.isFinite(Number(preview.phoneUsageMinutes)) || !(preview.phoneUsageMinutes > 0)
+              ? null
+              : !phoneHasExisting
+                ? { action: "added", value: preview.phoneUsageMinutes }
+                : phoneStrategy === "keep"
+                  ? { action: "kept", current: before.phone, aiSuggested: preview.phoneUsageMinutes }
+                  : { action: "replaced", previous: before.phone, next: preview.phoneUsageMinutes };
+
+        // PR-DQC-REPORT: report tổng hợp #4/#19 — Detected/Added/Updated/
+        // Skipped/Failed CHỈ lấy từ các report con đã track ở trên theo
+        // đúng sự kiện thực tế xảy ra, không hard-code / không suy đoán từ
+        // preview.length. Journal/QuickLogs không có khái niệm dedupe (luôn
+        // append) nên tính thẳng theo có ghi hay không.
+        const journalAdded = journalStamp.trim() ? 1 : 0,
+          quickLogsAdded = preview.aiSummary ? 1 : 0,
+          totalAdded =
+            taskReport.newlyCreated.length +
+            ideasReport.added.length +
+            waitingReport.added.length +
+            habitReport.newTaskCreated.length +
+            habitReport.completionRecorded.length +
+            futureEventReport.created.length +
+            journalAdded +
+            quickLogsAdded +
+            (moodReport?.action === "added" ? 1 : 0) +
+            (phoneReport?.action === "added" ? 1 : 0),
+          totalUpdated =
+            taskReport.completedNow.length +
+            (moodReport?.action === "replaced" ? 1 : 0) +
+            (phoneReport?.action === "replaced" ? 1 : 0),
+          totalUnchanged =
+            taskReport.matchedExisting.length +
+            habitReport.existingTaskMatched.length +
+            (moodReport?.action === "kept" ? 1 : 0) +
+            (phoneReport?.action === "kept" ? 1 : 0),
+          totalSkipped =
+            taskReport.skippedDuplicate.length +
+            ideasReport.skippedDuplicate.length +
+            waitingReport.skippedDuplicate.length +
+            habitReport.skippedDuplicate.length +
+            futureEventReport.skippedDuplicate.length +
+            futureEventReport.skippedNoDate.length,
+          totalFailed = habitReport.failed.length + futureEventReport.failed.length,
+          errors = [
+            ...habitReport.failed.map((f) => ({ module: "Habit", title: f.title, message: f.message })),
+            ...futureEventReport.failed.map((f) => ({ module: "Future Event", title: f.title, message: f.message })),
+          ];
+
+        return {
+          // PR-DQC-BACKFILL: lưu lại đúng ngày đã ghi để undoDqcEntry ghi
+          // trả lại snapshot "before" vào ĐÚNG ngày đó, không mặc định td.
+          effectiveDate: effectiveDate,
+          before: { ...before, ideas: ideasBefore, waiting: waitingBefore },
+          after: {
+            custom: customList,
+            journal: nextJournal,
+            mood: nextMood,
+            studyTime: nextStudyTime,
+            phone: nextPhone,
+            quickLogs: nextQuickLogs,
+            ideas: ideasAfter,
+            waiting: waitingAfter,
+          },
+          // Không nằm trong dayDatabase patch nên tách riêng khỏi
+          // before/after — undoDqcEntry dùng 2 mảng này để dọn đúng phần
+          // đã tạo thêm (xoá Personal Task mới tạo, xoá Future Event mới
+          // tạo), KHÔNG đụng task/event đã tồn tại từ trước.
+          habitTaskIdsCreated: habitTaskIdsCreated,
+          futureEventIdsCreated: futureEventIdsCreated,
+          // PR-DQC-REPORT: additive — trả thêm report chi tiết cho Import
+          // Report UI. Field mới, KHÔNG đổi/xoá field nào ở trên, mọi call
+          // site cũ chỉ đọc before/after/effectiveDate vẫn hoạt động y hệt.
+          report: {
+            isBackfill: isBackfill,
+            targetDate: effectiveDate,
+            importedDate: td,
+            summary: {
+              added: totalAdded,
+              updated: totalUpdated,
+              unchanged: totalUnchanged,
+              skipped: totalSkipped,
+              failed: totalFailed,
+            },
+            tasks: taskReport,
+            journal: { added: journalAdded },
+            quickLogs: { added: quickLogsAdded },
+            ideas: ideasReport,
+            waiting: waitingReport,
+            mood: moodReport,
+            phone: phoneReport,
+            habits: habitReport,
+            futureEvents: futureEventReport,
+          },
+          errors: errors,
+        };
+      }
+
+      // Hoàn tác: ghi lại đúng snapshot "before" đã lưu trong Activity Log,
+      // đồng thời xoá Personal Task/Future Event MỚI TẠO bởi lần Confirm đó
+      // (không đụng gì đã tồn tại từ trước lần Confirm này). PR-DQC-BACKFILL:
+      // ghi trả lại vào entry.effectiveDate (ngày dữ liệu thật) nếu có,
+      // fallback về td cho entry cũ (log trước bản backfill, chưa có field
+      // này) — additive, không phá Undo của các lần Confirm cũ hơn.
+      async function undoDqcEntry(entry, { td, saveFn }) {
+        if (!entry?.before) return false;
+        const restoreDate = entry.effectiveDate || td;
+        await saveFn(restoreDate, {
+          custom: entry.before.custom,
+          journal: entry.before.journal,
+          mood: entry.before.mood,
+          studyTime: entry.before.studyTime,
+          phone: entry.before.phone,
+          quickLogs: entry.before.quickLogs,
+        });
+        await saveDqcIdeas(entry.before.ideas || []);
+        await saveDqcWaiting(entry.before.waiting || []);
+        if ((entry.habitTaskIdsCreated || []).length) {
+          try {
+            const list = await getPersonalTasks();
+            await savePersonalTasks(list.filter((t) => !entry.habitTaskIdsCreated.includes(t.id)));
+          } catch (e) {
+            console.error("[Daily Quick Capture] undo habit task cleanup failed:", e);
+          }
+        }
+        if ((entry.futureEventIdsCreated || []).length) {
+          try {
+            for (const id of entry.futureEventIdsCreated) await deleteFutureEvent(id);
+          } catch (e) {
+            console.error("[Daily Quick Capture] undo future event cleanup failed:", e);
+          }
+        }
+        await removeDqcActivityLogEntry(entry.id);
+        return true;
       }
 
       /* ======================================================================
@@ -23358,6 +24178,12 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
          personal_*), chỉ mở rộng object được push vào history. Entry cũ
          (trước Phase 8) đơn giản không có các field này — mọi hàm đọc phải
          tolerate undefined/null, không throw. */
+      // PR-DQC-BACKFILL: thêm tham số optional completedAtOverride (ISO
+      // string hợp lệ) để caller ghi completedAt theo NGÀY DỮ LIỆU thay vì
+      // thời điểm gọi hàm thật — cần cho Quick Capture backfill (habit của
+      // ngày quá khứ phải tính vào Streak đúng ngày đó, không phải ngày
+      // Import). Mặc định null → giữ NGUYÊN hành vi cũ (new Date() tại thời
+      // điểm gọi) cho mọi caller hiện có (planner tick task, v.v).
       async function recordPersonalTaskCompletion({
         taskId,
         skipped = false,
@@ -23373,13 +24199,16 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
         examDay = null,
         holiday = null,
         gamingDay = null,
+        completedAtOverride = null,
       } = {}) {
         if (!taskId) return;
         try {
-          const list = await getPersonalTaskHistory();
+          const list = await getPersonalTaskHistory(),
+            isValidOverride =
+              typeof completedAtOverride === "string" && !isNaN(new Date(completedAtOverride).getTime());
           list.push({
             taskId,
-            completedAt: new Date().toISOString(),
+            completedAt: isValidOverride ? completedAtOverride : new Date().toISOString(),
             skipped: !!skipped,
             source: source || "planner",
             duration: Number.isFinite(Number(duration)) ? Number(duration) : null,
@@ -75437,6 +76266,40 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
                 React.createElement(
                   "div",
                   null,
+                  // PR-DQC-02: nút copy prompt chuẩn cho DeepSeek/Gemini đọc
+                  // ảnh Digital Wellbeing — câu lệnh khớp ĐÚNG field mà
+                  // parseDigitalActivityText() ở trên đọc được (Ngày/Tổng
+                  // thời gian/Mở khóa/Thông báo/Buổi sáng-chiều-tối/danh
+                  // sách app), để Bảo dán thẳng kết quả AI trả về vào ô bên
+                  // dưới mà không lo sai định dạng.
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: async () => {
+                        const ok = await plannerDebugCopyText(DIGITAL_ACTIVITY_AI_PROMPT);
+                        notifyUser(
+                          ok
+                            ? "📋 Đã copy câu lệnh — dán vào DeepSeek/Gemini kèm ảnh Digital Wellbeing."
+                            : "❌ Copy thất bại, thử lại.",
+                          { tone: ok ? "success" : "danger" },
+                        );
+                      },
+                      style: {
+                        width: "100%",
+                        marginBottom: 8,
+                        padding: "8px 0",
+                        borderRadius: 10,
+                        border: `1px dashed ${accent}`,
+                        background: "transparent",
+                        color: accent,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      },
+                    },
+                    "📋 Copy câu lệnh cho DeepSeek/Gemini (đọc ảnh Digital Wellbeing)",
+                  ),
                   React.createElement("textarea", {
                     value: text,
                     onChange: (e) => setText(e.target.value),
@@ -76982,6 +77845,1004 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
         );
       }
 
+      /* PR-DQC-01: DailyQuickCaptureCard — UI cho tính năng Daily Quick
+         Capture. Card gồm: TextArea lớn -> nút "Analyze with Gemini"/"Clear"
+         -> Preview (Confirm/Cancel). Tự quản lý state riêng (input/preview/
+         loading/error), chỉ ghi dữ liệu thật SAU KHI Bảo bấm Confirm — đúng
+         yêu cầu "không ghi đè dữ liệu cũ nếu Gemini không chắc chắn". */
+      function DailyQuickCaptureCard({ td, data, save, theme, accent }) {
+        const [text, setText] = useState(""),
+          [loading, setLoading] = useState(!1),
+          [error, setError] = useState(null),
+          [preview, setPreview] = useState(null),
+          [confirming, setConfirming] = useState(!1),
+          [lastUndo, setLastUndo] = useState(null),
+          // PR-DQC-REPORT: logEntry đầy đủ (kèm report/errors) của lần
+          // Confirm gần nhất — null khi chưa Confirm lần nào trong phiên
+          // này hoặc đã bấm Đóng. Tách khỏi lastUndo (lastUndo set null sau
+          // khi Undo thành công để chặn Undo 2 lần; lastReport vẫn giữ để
+          // Bảo còn xem lại report kể cả sau khi đã Undo — chỉ đổi cờ
+          // "undone", xem handleUndo).
+          [lastReport, setLastReport] = useState(null),
+          // PR-DQC-REPORT: section nào trong Report đang mở — mặc định
+          // rỗng (chỉ Summary mở), đúng yêu cầu #14 "mặc định chỉ mở phần
+          // Summary".
+          [reportOpenSections, setReportOpenSections] = useState({}),
+          [expanded, setExpanded] = useState(!1),
+          // PR-DQC-BACKFILL: ngày sẽ ghi dữ liệu vào — mặc định td (hôm nay).
+          // Set lại = preview.detectedDate mỗi khi có preview mới với
+          // dateConfidence cao; Bảo luôn có thể tự đổi qua Date Picker bên
+          // dưới trước khi Confirm, bất kể AI detect được hay không.
+          [targetDate, setTargetDate] = useState(td),
+          // PR-DQC-MERGE: thông tin ngày effectiveDate đã có dữ liệu gì
+          // chưa (đọc qua dqcCheckExistingDayData) — dùng để hiện cảnh báo
+          // Merge + toggle Keep/Replace cho Mood/Phone trong Preview. null
+          // = chưa check xong / không có preview.
+          [existingDayInfo, setExistingDayInfo] = useState(null),
+          // Mặc định "replace" cho cả 2 — đúng yêu cầu "Mặc định là Replace".
+          [moodStrategy, setMoodStrategy] = useState("replace"),
+          [phoneStrategy, setPhoneStrategy] = useState("replace"),
+          safeData = data && "object" == typeof data ? data : {};
+
+        // PR-DQC-MERGE: mỗi khi có preview VÀ targetDate thay đổi (kể cả do
+        // Bảo tự đổi Date Picker), check lại xem ngày đó đã có dữ liệu gì
+        // chưa — để cảnh báo + toggle Mood/Phone luôn khớp với ngày đang
+        // chọn. Reset strategy về mặc định "replace" mỗi lần đổi ngày (an
+        // toàn hơn là giữ lựa chọn cũ áp nhầm sang ngày khác).
+        useEffect(() => {
+          if (!preview) {
+            setExistingDayInfo(null);
+            return;
+          }
+          let cancelled = false;
+          dqcCheckExistingDayData(targetDate).then((info) => {
+            if (!cancelled) setExistingDayInfo(info);
+          });
+          setMoodStrategy("replace");
+          setPhoneStrategy("replace");
+          return () => {
+            cancelled = true;
+          };
+        }, [preview, targetDate]);
+
+        const handleClear = () => {
+          setText("");
+          setPreview(null);
+          setError(null);
+          setTargetDate(td);
+          setExistingDayInfo(null);
+        };
+
+        const handleAnalyze = async () => {
+          const trimmed = text.trim();
+          if (!trimmed) return;
+          setError(null);
+          setLoading(!0);
+          try {
+            const apiKey = await getGeminiApiKey();
+            if (!apiKey) {
+              setError("Chưa cấu hình Gemini API key trong Cài đặt.");
+              setLoading(!1);
+              return;
+            }
+            const existingTitles = (Array.isArray(safeData.custom) ? safeData.custom : [])
+                .filter((t) => !t.done)
+                .map((t) => t.title)
+                .concat(
+                  (Array.isArray(safeData.custom) ? safeData.custom : [])
+                    .filter((t) => t.done)
+                    .map((t) => t.title),
+                ),
+              result = await callGeminiDailyQuickCapture(apiKey, trimmed, existingTitles);
+            setPreview({ ...result, rawText: trimmed });
+            // PR-DQC-BACKFILL: chỉ auto-set targetDate khi Gemini thực sự
+            // chắc chắn (dateConfidence > 0.7) VÀ detectedDate hợp lệ —
+            // tránh tự ý đổi ngày dựa trên suy đoán mơ hồ. Bảo vẫn luôn có
+            // Date Picker để tự sửa lại dù AI đúng hay sai.
+            const dd = result?.detectedDate,
+              dc = Number(result?.dateConfidence) || 0;
+            setTargetDate(dd && /^\d{4}-\d{2}-\d{2}$/.test(dd) && dc > 0.7 ? dd : td);
+          } catch (err) {
+            setError(err?.message || "Không phân tích được, thử lại sau.");
+          } finally {
+            setLoading(!1);
+          }
+        };
+
+        const handleConfirm = async () => {
+          if (!preview) return;
+          setConfirming(!0);
+          try {
+            const {
+                before,
+                after,
+                effectiveDate,
+                habitTaskIdsCreated,
+                futureEventIdsCreated,
+                report,
+                errors,
+              } = await applyDqcPreview({
+                preview: preview,
+                td: td,
+                targetDate: targetDate,
+                todayData: safeData,
+                saveFn: save,
+                moodStrategy: moodStrategy,
+                phoneStrategy: phoneStrategy,
+              }),
+              logEntry = {
+                id: "dqc_log_" + Date.now(),
+                td: td,
+                // PR-DQC-BACKFILL: effectiveDate = ngày dữ liệu THẬT đã ghi
+                // (có thể khác td) — Activity Log/Undo dùng field này, td
+                // vẫn giữ để biết ngày Import thật sự diễn ra (yêu cầu #7).
+                effectiveDate: effectiveDate,
+                createdAt: Date.now(),
+                summary: preview.aiSummary || "",
+                before: before,
+                after: after,
+                // PR-DQC-REPORT: additive — trước đây logEntry KHÔNG lưu
+                // habitTaskIdsCreated/futureEventIdsCreated (dù
+                // undoDqcEntry cần 2 field này để dọn Personal Task/Future
+                // Event mới tạo) nên Undo cho 2 phần này thực chất chưa từng
+                // hoạt động. Bổ sung ở đây là additive (thêm field bị
+                // thiếu), không đổi field cũ nào — vá đúng lỗ hổng, không
+                // đổi hành vi các field before/after/summary đã có.
+                habitTaskIdsCreated: habitTaskIdsCreated || [],
+                futureEventIdsCreated: futureEventIdsCreated || [],
+                // PR-DQC-REPORT: lưu report + errors để Import Report UI
+                // đọc lại được (kể cả sau reload) và để Activity Log có đủ
+                // thông tin audit theo yêu cầu #18.
+                report: report || null,
+                errors: errors || [],
+              };
+            await pushDqcActivityLog(logEntry);
+            setLastUndo(logEntry);
+            setLastReport(logEntry);
+            setReportOpenSections({});
+            setExpanded(!0); // đảm bảo Report hiển thị ngay sau Confirm dù card đang thu gọn
+            setPreview(null);
+            setText("");
+            setTargetDate(td);
+          } catch (err) {
+            setError(err?.message || "Không ghi được dữ liệu, thử lại.");
+          } finally {
+            setConfirming(!1);
+          }
+        };
+
+        const handleCancelPreview = () => setPreview(null);
+
+        const handleUndo = async () => {
+          if (!lastUndo) return;
+          try {
+            await undoDqcEntry(lastUndo, { td: td, saveFn: save });
+            setLastUndo(null);
+            // PR-DQC-REPORT: nếu Report đang hiển thị đúng là entry vừa bị
+            // undo, đánh dấu lại trong report UI (không xoá report — vẫn
+            // cho xem lại đã import gì, chỉ đổi trạng thái) thay vì im lặng
+            // đóng report, đúng yêu cầu #15.
+            setLastReport((r) => (r && r.id === lastUndo.id ? { ...r, undone: true } : r));
+            notifyUser(`↩️ Đã hoàn tác Import ngày ${lastUndo.effectiveDate}.`, { tone: "default" });
+          } catch {
+            notifyUser("⚠️ Không thể hoàn tác hoàn toàn.", { tone: "danger" });
+          }
+        };
+
+        // PR-DQC-REPORT: format phút -> "5h12m" cho Report Phone Usage (#10).
+        // Chỉ format hiển thị — KHÔNG đụng gì tới field phone lưu trong
+        // dayDatabase (vẫn nguyên đơn vị phút như applyDqcPreview trả về).
+        const dqcFormatMinutes = (mins) => {
+          const m = Number(mins) || 0,
+            h = Math.floor(m / 60),
+            r = Math.round(m % 60);
+          return h > 0 ? `${h}h${String(r).padStart(2, "0")}m` : `${r}m`;
+        };
+
+        const toggleReportSection = (key) =>
+          setReportOpenSections((s) => ({ ...s, [key]: !s[key] }));
+
+        // PR-DQC-REPORT: 1 dòng report dạng "✓/⊘/+/↔ tiêu đề" tái sử dụng
+        // cho mọi section — KHÔNG tính toán gì, chỉ hiển thị đúng dữ liệu
+        // report đã được ghi lại tại chỗ trong applyDqcPreview (#19).
+        const renderReportLines = (icon, lines) =>
+          React.createElement(
+            "ul",
+            { style: { margin: "4px 0 0", paddingLeft: 16, fontSize: 11.5, color: theme.textDim, lineHeight: 1.7 } },
+            lines.map((line, i) =>
+              React.createElement("li", { key: icon + i }, line),
+            ),
+          );
+
+        // PR-DQC-REPORT: 1 section expand/collapse trong Report (#14) —
+        // header dạng "▼/▶ icon Label" bấm để mở, chỉ render children khi
+        // mở. sectionKey dùng để lưu trạng thái mở/đóng riêng từng section.
+        const renderReportSection = (sectionKey, icon, label, countLabel, children) => {
+          if (!children) return null;
+          const open = !!reportOpenSections[sectionKey];
+          return React.createElement(
+            "div",
+            { key: sectionKey, style: { marginTop: 6 } },
+            React.createElement(
+              "div",
+              {
+                onClick: () => toggleReportSection(sectionKey),
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: theme.text,
+                },
+              },
+              React.createElement("span", null, (open ? "▼ " : "▶ ") + icon + " " + label),
+              countLabel &&
+                React.createElement("span", { style: { fontSize: 10.5, color: theme.textDim, fontWeight: 400 } }, countLabel),
+            ),
+            open && children,
+          );
+        };
+
+        // PR-DQC-REPORT: render toàn bộ Import Report — đọc TOÀN BỘ dữ liệu
+        // từ logEntry.report (kết quả thực tế applyDqcPreview trả về khi
+        // Confirm), KHÔNG tự tính lại/suy đoán gì thêm (#19), KHÔNG tính
+        // lại Analytics (#16), KHÔNG gọi lại bất kỳ save nào (#17).
+        const renderImportReport = () => {
+          if (!lastReport) return null;
+          const r = lastReport.report;
+          if (!r) return null; // entry log cũ (trước PR-DQC-REPORT) không có report — không hiện gì, không suy đoán
+          const s = r.summary,
+            hasErrors = (lastReport.errors || []).length > 0,
+            partial = s.failed > 0,
+            headerLabel = lastReport.undone
+              ? `↩ Đã hoàn tác Import ngày ${r.targetDate}`
+              : partial
+                ? "⚠️ Import hoàn tất một phần"
+                : "✅ Import hoàn tất";
+
+          const taskChildren =
+            r.tasks &&
+            (r.tasks.newlyCreated.length ||
+              r.tasks.completedNow.length ||
+              r.tasks.matchedExisting.length ||
+              r.tasks.skippedDuplicate.length)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.tasks.newlyCreated.length
+                    ? renderReportLines("n", r.tasks.newlyCreated.map((t) => `+ ${t.title}`))
+                    : null,
+                  r.tasks.completedNow.length
+                    ? renderReportLines("c", r.tasks.completedNow.map((t) => `+ ${t.matchedExistingTitle || t.title}`))
+                    : null,
+                  r.tasks.matchedExisting.length
+                    ? renderReportLines("m", r.tasks.matchedExisting.map((t) => `+ ${t.matchedExistingTitle || t.title}`))
+                    : null,
+                  r.tasks.skippedDuplicate.length
+                    ? renderReportLines(
+                        "sk",
+                        r.tasks.skippedDuplicate.map((t) => `+ ${t.title} — Lý do: ${t.reason}`),
+                      )
+                    : null,
+                )
+              : null;
+
+          const journalQuickLogsChildren =
+            (r.journal?.added || r.quickLogs?.added)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.journal?.added
+                    ? React.createElement(
+                        "div",
+                        { style: { fontSize: 11.5, color: theme.textDim, marginTop: 4 } },
+                        `📖 + ${r.journal.added} đoạn nhật ký được thêm`,
+                      )
+                    : null,
+                  r.quickLogs?.added
+                    ? React.createElement(
+                        "div",
+                        { style: { fontSize: 11.5, color: theme.textDim, marginTop: 4 } },
+                        `⚡ + ${r.quickLogs.added} log được thêm`,
+                      )
+                    : null,
+                )
+              : null;
+
+          const ideasChildren =
+            r.ideas && (r.ideas.added.length || r.ideas.skippedDuplicate.length)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.ideas.added.length
+                    ? renderReportLines("ia", r.ideas.added.map((it) => `+ ${it.text}`))
+                    : null,
+                  r.ideas.skippedDuplicate.length
+                    ? renderReportLines(
+                        "isk",
+                        r.ideas.skippedDuplicate.map((it) => `⊘ ${it.text} — trùng`),
+                      )
+                    : null,
+                )
+              : null;
+
+          const waitingChildren =
+            r.waiting && (r.waiting.added.length || r.waiting.skippedDuplicate.length)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.waiting.added.length
+                    ? renderReportLines("wa", r.waiting.added.map((it) => `+ ${it.text}`))
+                    : null,
+                  r.waiting.skippedDuplicate.length
+                    ? renderReportLines(
+                        "wsk",
+                        r.waiting.skippedDuplicate.map((it) => `⊘ ${it.text} — trùng`),
+                      )
+                    : null,
+                )
+              : null;
+
+          const moodChildren =
+            r.mood &&
+            React.createElement(
+              "div",
+              { style: { fontSize: 11.5, color: theme.textDim, marginTop: 4 } },
+              r.mood.action === "added"
+                ? `+ Đã thêm: ${r.mood.value}`
+                : r.mood.action === "kept"
+                  ? `→ Giữ nguyên\nHiện tại: ${r.mood.current}\nAI đề xuất: ${r.mood.aiSuggested}`
+                  : `→ Đã thay thế\nCũ: ${r.mood.previous}\nMới: ${r.mood.next}`,
+            );
+
+          const phoneChildren =
+            r.phone &&
+            React.createElement(
+              "div",
+              { style: { fontSize: 11.5, color: theme.textDim, marginTop: 4, whiteSpace: "pre-line" } },
+              r.phone.action === "added"
+                ? `+ Đã thêm: ${dqcFormatMinutes(r.phone.value)}`
+                : r.phone.action === "kept"
+                  ? `→ Giữ nguyên\nHiện tại: ${dqcFormatMinutes(r.phone.current)}\nDữ liệu AI: ${dqcFormatMinutes(r.phone.aiSuggested)}`
+                  : `→ Đã thay thế\nCũ: ${dqcFormatMinutes(r.phone.previous)}\nMới: ${dqcFormatMinutes(r.phone.next)}`,
+            );
+
+          const habitsChildren =
+            r.habits &&
+            (r.habits.newTaskCreated.length ||
+              r.habits.completionRecorded.length ||
+              r.habits.existingTaskMatched.length ||
+              r.habits.skippedDuplicate.length ||
+              r.habits.failed.length)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.habits.newTaskCreated.length
+                    ? renderReportLines("hn", r.habits.newTaskCreated.map((h) => `+ Tạo Personal Task: ${h.title}`))
+                    : null,
+                  r.habits.existingTaskMatched.length
+                    ? renderReportLines(
+                        "he",
+                        r.habits.existingTaskMatched.map((h) => `↔ Personal Task đã tồn tại: ${h.matchedExistingTitle || h.title}`),
+                      )
+                    : null,
+                  r.habits.completionRecorded.length
+                    ? renderReportLines("hc", r.habits.completionRecorded.map((h) => `+ Ghi completion: ${h.date}  (${h.title})`))
+                    : null,
+                  r.habits.skippedDuplicate.length
+                    ? renderReportLines(
+                        "hsk",
+                        r.habits.skippedDuplicate.map((h) => `⊘ ${h.title} — Lý do: ${h.reason}`),
+                      )
+                    : null,
+                  r.habits.failed.length
+                    ? renderReportLines(
+                        "hf",
+                        r.habits.failed.map((h) => `❌ ${h.title || "(habit)"} — ${h.message}`),
+                      )
+                    : null,
+                )
+              : null;
+
+          const futureEventsChildren =
+            r.futureEvents &&
+            (r.futureEvents.created.length ||
+              r.futureEvents.skippedDuplicate.length ||
+              r.futureEvents.skippedNoDate.length ||
+              r.futureEvents.failed.length)
+              ? React.createElement(
+                  React.Fragment,
+                  null,
+                  r.futureEvents.created.length
+                    ? renderReportLines(
+                        "fc",
+                        r.futureEvents.created.map((e) => `+ ${e.title}\n${e.date} · ${e.priority}`),
+                      )
+                    : null,
+                  r.futureEvents.skippedDuplicate.length
+                    ? renderReportLines(
+                        "fsk",
+                        r.futureEvents.skippedDuplicate.map((e) => `⊘ ${e.title} — Lý do: ${e.reason}`),
+                      )
+                    : null,
+                  r.futureEvents.skippedNoDate.length
+                    ? renderReportLines(
+                        "fnd",
+                        r.futureEvents.skippedNoDate.map((e) => `⊘ ${e.title} — Lý do: ${e.reason}`),
+                      )
+                    : null,
+                  r.futureEvents.failed.length
+                    ? renderReportLines(
+                        "ff",
+                        r.futureEvents.failed.map((e) => `❌ ${e.title || "(event)"} — ${e.message}`),
+                      )
+                    : null,
+                )
+              : null;
+
+          return React.createElement(
+            Card,
+            { style: { marginTop: 10, background: theme.surfaceAlt || theme.bg } },
+            React.createElement(
+              "div",
+              { style: { fontSize: 12.5, fontWeight: 700, color: partial ? "#d97706" : theme.text } },
+              headerLabel,
+            ),
+            React.createElement(
+              "div",
+              { style: { fontSize: 11, color: theme.textDim, marginTop: 2 } },
+              r.isBackfill
+                ? `📅 Dữ liệu ngày ${r.targetDate}  ·  Imported: ${r.importedDate}`
+                : `📅 ${r.targetDate}`,
+            ),
+            React.createElement(
+              "div",
+              { style: { fontSize: 11.5, color: theme.text, marginTop: 6, fontWeight: 600 } },
+              `+${s.added} thêm · ↻${s.updated} cập nhật · ↔${s.unchanged} giữ nguyên`,
+            ),
+            React.createElement(
+              "div",
+              { style: { fontSize: 11.5, color: theme.text, marginTop: 2, fontWeight: 600 } },
+              `⊘${s.skipped} bỏ qua · ⚠️${s.failed} lỗi`,
+            ),
+            renderReportSection("tasks", "✅", "Tasks", null, taskChildren),
+            journalQuickLogsChildren &&
+              renderReportSection("journal", "📖", "Journal / Quick Logs", null, journalQuickLogsChildren),
+            renderReportSection("ideas", "💡", "Ideas", null, ideasChildren),
+            renderReportSection("waiting", "⏳", "Waiting / Follow-up", null, waitingChildren),
+            r.mood && renderReportSection("mood", "😊", "Mood", null, moodChildren),
+            r.phone && renderReportSection("phone", "📱", "Phone Usage", null, phoneChildren),
+            renderReportSection("habits", "🔁", "Habits", null, habitsChildren),
+            renderReportSection("futureEvents", "📅", "Future Events", null, futureEventsChildren),
+            hasErrors &&
+              React.createElement(
+                "div",
+                { style: { marginTop: 8 } },
+                React.createElement(
+                  "div",
+                  { style: { fontSize: 11, fontWeight: 700, color: theme.danger || "#dc2626" } },
+                  "❌ Lỗi",
+                ),
+                renderReportLines(
+                  "err",
+                  lastReport.errors.map((e) => `${e.module}${e.title ? " — " + e.title : ""}: ${e.message}`),
+                ),
+              ),
+            React.createElement(
+              "div",
+              { style: { display: "flex", gap: 8, marginTop: 10 } },
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => setLastReport(null),
+                  style: {
+                    padding: "7px 14px",
+                    borderRadius: 999,
+                    border: `1px solid ${theme.border}`,
+                    background: "transparent",
+                    color: theme.textDim,
+                    fontSize: 11,
+                    cursor: "pointer",
+                  },
+                },
+                "Đóng",
+              ),
+              !lastReport.undone &&
+                lastUndo &&
+                lastUndo.id === lastReport.id &&
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: handleUndo,
+                    style: {
+                      padding: "7px 14px",
+                      borderRadius: 999,
+                      border: `1px solid ${theme.border}`,
+                      background: "transparent",
+                      color: theme.textDim,
+                      fontSize: 11,
+                      cursor: "pointer",
+                    },
+                  },
+                  "↩ Hoàn tác",
+                ),
+            ),
+          );
+        };
+
+        const renderPreviewSection = (label, icon, items, keyPrefix) => {
+          if (!items || !items.length) return null;
+          return React.createElement(
+            "div",
+            { style: { marginTop: 10 } },
+            React.createElement(
+              "div",
+              { style: { fontSize: 11, fontWeight: 700, color: theme.text, marginBottom: 4 } },
+              icon + " " + label,
+            ),
+            React.createElement(
+              "ul",
+              { style: { margin: 0, paddingLeft: 18, fontSize: 12, color: theme.textDim, lineHeight: 1.7 } },
+              items.map((item, i) =>
+                React.createElement(
+                  "li",
+                  { key: keyPrefix + i },
+                  typeof item === "string" ? item : item.title,
+                  typeof item === "object" && item.lowConfidence
+                    ? React.createElement(
+                        "span",
+                        { style: { color: "#d97706", fontSize: 10, marginLeft: 6 } },
+                        "(chưa chắc — kiểm tra lại)",
+                      )
+                    : null,
+                ),
+              ),
+            ),
+          );
+        };
+
+        return React.createElement(
+          Card,
+          { style: { marginBottom: 14 } },
+          React.createElement(
+            "div",
+            {
+              onClick: () => setExpanded((v) => !v),
+              style: {
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: "pointer",
+              },
+            },
+            React.createElement(
+              "div",
+              { style: { fontSize: 12, fontWeight: 700, color: accent } },
+              "📥 Daily Quick Capture",
+            ),
+            React.createElement(
+              "span",
+              { style: { fontSize: 11, color: theme.textDim } },
+              expanded ? "▲ Thu gọn" : "▼ Mở rộng",
+            ),
+          ),
+          expanded &&
+            React.createElement(
+              "div",
+              { style: { marginTop: 10 } },
+              !preview &&
+                React.createElement(
+                  React.Fragment,
+                  null,
+                  // PR-DQC-02: nút copy câu lệnh chuẩn cho DeepSeek/Gemini
+                  // ngoài — để Bảo nhờ AI khác tóm tắt ngày (kèm ảnh) rồi
+                  // dán thẳng kết quả vào ô bên dưới, không lo AI ngoài trả
+                  // lời sai định dạng khiến Gemini nội bộ đọc thiếu ý.
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: async () => {
+                        const ok = await plannerDebugCopyText(DQC_AI_PROMPT);
+                        notifyUser(
+                          ok
+                            ? "📋 Đã copy câu lệnh — dán vào DeepSeek/Gemini kèm ảnh/mô tả ngày hôm nay."
+                            : "❌ Copy thất bại, thử lại.",
+                          { tone: ok ? "success" : "danger" },
+                        );
+                      },
+                      style: {
+                        width: "100%",
+                        marginBottom: 8,
+                        padding: "8px 0",
+                        borderRadius: 10,
+                        border: `1px dashed ${accent}`,
+                        background: "transparent",
+                        color: accent,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      },
+                    },
+                    "📋 Copy câu lệnh nhờ AI ngoài tóm tắt ngày hôm nay",
+                  ),
+                  React.createElement("textarea", {
+                    value: text,
+                    onChange: (e) => setText(e.target.value.slice(0, DQC_INPUT_MAX_LEN)),
+                    placeholder: "Hôm nay bạn đã làm gì? Hãy viết tự nhiên hoặc dán bản tóm tắt.",
+                    rows: 5,
+                    maxLength: DQC_INPUT_MAX_LEN,
+                    disabled: loading,
+                    style: {
+                      width: "100%",
+                      boxSizing: "border-box",
+                      background: theme.surfaceAlt || theme.bg,
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 10,
+                      padding: "9px 10px",
+                      color: theme.text,
+                      fontSize: 12,
+                      outline: "none",
+                      resize: "vertical",
+                      marginBottom: 8,
+                    },
+                  }),
+                  error &&
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: 11, color: theme.danger || "#dc2626", marginBottom: 8 } },
+                      "⚠️ " + error,
+                    ),
+                  React.createElement(
+                    "div",
+                    { style: { display: "flex", gap: 8 } },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        disabled: loading || !text.trim(),
+                        onClick: handleAnalyze,
+                        style: {
+                          flex: 1,
+                          padding: "10px 0",
+                          borderRadius: 999,
+                          border: "none",
+                          background: loading || !text.trim() ? theme.neutral : accent,
+                          color: "white",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          cursor: loading || !text.trim() ? "not-allowed" : "pointer",
+                          opacity: loading || !text.trim() ? 0.6 : 1,
+                        },
+                      },
+                      loading ? "Đang phân tích…" : "✨ Analyze with Gemini",
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: handleClear,
+                        disabled: loading,
+                        style: {
+                          padding: "10px 16px",
+                          borderRadius: 999,
+                          border: `1px solid ${theme.border}`,
+                          background: "transparent",
+                          color: theme.textDim,
+                          fontSize: 12,
+                          cursor: "pointer",
+                        },
+                      },
+                      "Clear",
+                    ),
+                  ),
+                  // PR-DQC-REPORT: nút Undo rời này chỉ còn cần khi KHÔNG
+                  // có Report đang hiển thị (Report card bên dưới đã có
+                  // nút "↩ Hoàn tác" riêng gọi cùng handleUndo — tránh 2 nút
+                  // trùng chức năng). lastUndo vẫn là nguồn sự thật duy nhất
+                  // cho việc còn undo được hay không, không tạo cơ chế thứ 2.
+                  lastUndo &&
+                    !lastReport &&
+                    React.createElement(
+                      "div",
+                      { style: { marginTop: 8, textAlign: "right" } },
+                      React.createElement(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: handleUndo,
+                          style: {
+                            fontSize: 10.5,
+                            color: theme.textDim,
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                          },
+                        },
+                        "↩️ Hoàn tác lần ghi nhanh gần nhất",
+                      ),
+                    ),
+                  // PR-DQC-REPORT: Import Report — chỉ hiện sau Confirm
+                  // (#2), độc lập với Preview (Preview vẫn giữ nguyên như
+                  // hiện tại, xem nhánh preview && ... bên dưới).
+                  renderImportReport(),
+                ),
+              preview &&
+                React.createElement(
+                  "div",
+                  null,
+                  React.createElement(
+                    "div",
+                    { style: { fontSize: 11, fontWeight: 700, color: theme.text, marginBottom: 4 } },
+                    "Xem trước — kiểm tra rồi Confirm để ghi dữ liệu",
+                  ),
+                  // PR-DQC-BACKFILL: Date Picker luôn hiển thị trong Preview
+                  // (bất kể AI có detect được ngày hay không) — Bảo tự đổi
+                  // ngày lưu trước khi Confirm. Dòng text bên dưới nêu rõ sẽ
+                  // ghi vào ngày nào, đổi màu cảnh báo khi khác hôm nay.
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 8,
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        background: theme.surfaceAlt || theme.bg,
+                        border: `1px solid ${targetDate !== td ? "#d97706" : theme.border}`,
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      { style: { fontSize: 11, color: theme.textDim, whiteSpace: "nowrap" } },
+                      "📅 Lưu vào ngày:",
+                    ),
+                    React.createElement("input", {
+                      type: "date",
+                      value: targetDate,
+                      max: td,
+                      onChange: (e) => e.target.value && setTargetDate(e.target.value),
+                      style: {
+                        flex: 1,
+                        border: `1px solid ${theme.border}`,
+                        borderRadius: 6,
+                        padding: "4px 6px",
+                        fontSize: 12,
+                        background: theme.bg,
+                        color: theme.text,
+                      },
+                    }),
+                  ),
+                  targetDate !== td &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          fontSize: 11,
+                          color: "#d97706",
+                          fontWeight: 600,
+                          marginBottom: 8,
+                        },
+                      },
+                      `⚠️ Dữ liệu này sẽ được lưu vào ngày ${targetDate}, không phải hôm nay.`,
+                    ),
+                  // PR-DQC-MERGE: cảnh báo Merge khi ngày effectiveDate đã
+                  // có dữ liệu — hiển thị dạng thông báo trung tính (không
+                  // chặn Confirm), đúng yêu cầu "vẫn có thể Confirm bình
+                  // thường". existingDayInfo null trong lúc đang check
+                  // (useEffect async) → không hiện gì để tránh nhấp nháy.
+                  existingDayInfo?.hasAnyData &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          fontSize: 11,
+                          color: theme.textDim,
+                          background: theme.surfaceAlt || theme.bg,
+                          border: `1px solid ${theme.border}`,
+                          borderRadius: 8,
+                          padding: "6px 10px",
+                          marginBottom: 8,
+                        },
+                      },
+                      "ℹ️ Ngày này đã có dữ liệu. Hệ thống sẽ Merge theo quy tắc hiện có (không ghi đè Journal/Task/Ý tưởng/Theo dõi cũ).",
+                    ),
+                  // Toggle Keep Existing / Replace cho Mood — CHỈ hiện khi
+                  // ngày đó đã có Mood VÀ preview có mood mới để ghi (nếu
+                  // preview không có mood thì không có gì để chọn). Mặc
+                  // định "replace" (moodStrategy state khởi tạo sẵn).
+                  existingDayInfo?.hasMood &&
+                    preview.mood &&
+                    React.createElement(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8, fontSize: 11.5 } },
+                      React.createElement("span", { style: { color: theme.textDim } }, "Mood ngày này đã có sẵn:"),
+                      React.createElement(
+                        "label",
+                        { style: { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: theme.text } },
+                        React.createElement("input", {
+                          type: "radio",
+                          checked: moodStrategy === "replace",
+                          onChange: () => setMoodStrategy("replace"),
+                        }),
+                        "Replace",
+                      ),
+                      React.createElement(
+                        "label",
+                        { style: { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: theme.text } },
+                        React.createElement("input", {
+                          type: "radio",
+                          checked: moodStrategy === "keep",
+                          onChange: () => setMoodStrategy("keep"),
+                        }),
+                        "Keep Existing",
+                      ),
+                    ),
+                  // Toggle tương tự cho Phone Usage.
+                  existingDayInfo?.hasPhone &&
+                    Number.isFinite(Number(preview.phoneUsageMinutes)) &&
+                    preview.phoneUsageMinutes > 0 &&
+                    React.createElement(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8, fontSize: 11.5 } },
+                      React.createElement("span", { style: { color: theme.textDim } }, "Phone Usage ngày này đã có sẵn:"),
+                      React.createElement(
+                        "label",
+                        { style: { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: theme.text } },
+                        React.createElement("input", {
+                          type: "radio",
+                          checked: phoneStrategy === "replace",
+                          onChange: () => setPhoneStrategy("replace"),
+                        }),
+                        "Replace",
+                      ),
+                      React.createElement(
+                        "label",
+                        { style: { display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: theme.text } },
+                        React.createElement("input", {
+                          type: "radio",
+                          checked: phoneStrategy === "keep",
+                          onChange: () => setPhoneStrategy("keep"),
+                        }),
+                        "Keep Existing",
+                      ),
+                    ),
+                  preview.aiSummary &&
+                    React.createElement(
+                      "div",
+                      {
+                        style: {
+                          fontSize: 12,
+                          color: theme.textDim,
+                          fontStyle: "italic",
+                          marginBottom: 6,
+                          lineHeight: 1.5,
+                        },
+                      },
+                      preview.aiSummary,
+                    ),
+                  renderPreviewSection("Hoàn thành", "✓", preview.completed, "c"),
+                  renderPreviewSection("Đang làm", "⏳", preview.inProgress, "p"),
+                  renderPreviewSection("Task mới", "＋", preview.newTasks, "n"),
+                  renderPreviewSection("Ý tưởng", "💡", preview.ideas, "i"),
+                  renderPreviewSection("Theo dõi", "👀", preview.waiting, "w"),
+                  renderPreviewSection("Thói quen", "🔁", preview.habits, "h"),
+                  preview.mood &&
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: 12, color: theme.textDim, marginTop: 8 } },
+                      "Mood: ",
+                      React.createElement("b", { style: { color: theme.text } }, preview.mood),
+                    ),
+                  Number.isFinite(Number(preview.workTimeMinutes)) &&
+                    preview.workTimeMinutes > 0 &&
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: 12, color: theme.textDim, marginTop: 4 } },
+                      "Work Time: ",
+                      React.createElement("b", { style: { color: theme.text } }, preview.workTimeMinutes + " phút"),
+                    ),
+                  Number.isFinite(Number(preview.phoneUsageMinutes)) &&
+                    preview.phoneUsageMinutes > 0 &&
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: 12, color: theme.textDim, marginTop: 4 } },
+                      "Phone Usage: ",
+                      React.createElement("b", { style: { color: theme.text } }, preview.phoneUsageMinutes + " phút"),
+                    ),
+                  (preview.deadlines || []).length > 0 &&
+                    React.createElement(
+                      "div",
+                      { style: { marginTop: 8 } },
+                      React.createElement(
+                        "div",
+                        { style: { fontSize: 11, fontWeight: 700, color: theme.text, marginBottom: 4 } },
+                        "📅 Deadline",
+                      ),
+                      React.createElement(
+                        "ul",
+                        { style: { margin: 0, paddingLeft: 18, fontSize: 12, color: theme.textDim, lineHeight: 1.7 } },
+                        preview.deadlines.map((d, i) =>
+                          React.createElement(
+                            "li",
+                            { key: "dl" + i },
+                            `${d.taskTitle} (${d.text})`,
+                            d.isoDateGuess && /^\d{4}-\d{2}-\d{2}$/.test(d.isoDateGuess)
+                              ? React.createElement(
+                                  "span",
+                                  { style: { color: accent, fontSize: 10, marginLeft: 6 } },
+                                  `→ sẽ tạo lịch ${d.isoDateGuess}`,
+                                )
+                              : React.createElement(
+                                  "span",
+                                  { style: { color: "#d97706", fontSize: 10, marginLeft: 6 } },
+                                  "(ngày chưa rõ — chỉ ghi chú, không tự tạo lịch)",
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  error &&
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: 11, color: theme.danger || "#dc2626", marginTop: 8 } },
+                      "⚠️ " + error,
+                    ),
+                  React.createElement(
+                    "div",
+                    { style: { display: "flex", gap: 8, marginTop: 12 } },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        disabled: confirming,
+                        onClick: handleConfirm,
+                        style: {
+                          flex: 1,
+                          padding: "10px 0",
+                          borderRadius: 999,
+                          border: "none",
+                          background: confirming ? theme.neutral : accent,
+                          color: "white",
+                          fontWeight: 700,
+                          fontSize: 12,
+                          cursor: confirming ? "not-allowed" : "pointer",
+                          opacity: confirming ? 0.6 : 1,
+                        },
+                      },
+                      confirming ? "Đang ghi…" : "✓ Confirm",
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: handleCancelPreview,
+                        disabled: confirming,
+                        style: {
+                          padding: "10px 16px",
+                          borderRadius: 999,
+                          border: `1px solid ${theme.border}`,
+                          background: "transparent",
+                          color: theme.textDim,
+                          fontSize: 12,
+                          cursor: "pointer",
+                        },
+                      },
+                      "Cancel",
+                    ),
+                  ),
+                ),
+            ),
+        );
+      }
+
       function Today(props) {
         const theme = useContext(ThemeContext),
           accent = useContext(AccentContext),
@@ -77222,6 +79083,16 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
             studySecs: props.studySecs,
             onOpenPomodoro: props.onOpenPomodoro,
             onOpenGoals: openGoals,
+          }),
+          // PR-DQC-01: Daily Quick Capture — additive sibling ngay dưới Hero,
+          // trước checklist. Tự quản lý state/Gemini call riêng, chỉ đọc
+          // props.data/props.td và ghi qua props.save (saveDayData) đã có.
+          React.createElement(DailyQuickCaptureCard, {
+            td: props.td,
+            data: props.data,
+            save: props.save,
+            theme: theme,
+            accent: accent,
           }),
           xpFly &&
             React.createElement(
@@ -102044,7 +103915,7 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
         id: "daily-tasks",
         label: "Daily Tasks",
         dependencies: ["storage"],
-        storagePrefixes: ["d:", "v25:skipHistory", "v38:customCatalog"],
+        storagePrefixes: ["d:", "v25:skipHistory", "v38:customCatalog", "v1:dqc:"],
         components: [
           ["Today", Today],
           ["TodayChecklistCard", TodayChecklistCard],
@@ -102052,6 +103923,7 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           ["MorningCheckinForm", MorningCheckinForm],
           ["TaskPoolManagerModal", TaskPoolManagerModal],
           ["AddManualTaskRow", AddManualTaskRow],
+          ["DailyQuickCaptureCard", DailyQuickCaptureCard],
         ],
       });
 
