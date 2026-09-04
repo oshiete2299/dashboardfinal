@@ -213,6 +213,133 @@
         gap: 10px;
         margin-top: 16px;
       }
+      /* ======================================================================
+         UX REFACTOR 2026-09 — TODAY V2 (Hero / Next Action / Tasks / Focus)
+         Tách Hero (chào hỏi + streak + XP + progress) khỏi Next Action (CTA
+         lớn nhất màn hình) theo đúng triết lý "3 câu hỏi" — additive-only,
+         không đụng token/class REFACTOR 2026-08 ở trên.
+         ====================================================================== */
+      .gb-today-date {
+        margin: 4px 0 0;
+        font-size: 21px;
+        line-height: 1.2;
+        font-weight: 850;
+        letter-spacing: -0.02em;
+        color: var(--gb-text);
+      }
+      .gb-hero-stats-row {
+        display: flex;
+        gap: var(--space-2);
+        margin-top: 14px;
+      }
+      .gb-hero-stat-chip {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--gb-surface-alt);
+      }
+      .gb-hero-stat-chip-label {
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        color: var(--gb-text-dim);
+        text-transform: uppercase;
+      }
+      .gb-hero-stat-chip-value {
+        font-size: 15px;
+        font-weight: 800;
+        color: var(--gb-text);
+      }
+      .gb-progress-track {
+        position: relative;
+        margin-top: 12px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--gb-surface-alt);
+        overflow: hidden;
+      }
+      .gb-progress-fill {
+        position: absolute;
+        inset: 0;
+        width: var(--gb-progress, 0%);
+        border-radius: 999px;
+        background: var(--gb-accent);
+        transition: width 0.4s var(--gb-ease);
+      }
+      .gb-next-action-title {
+        margin: 8px 0 0;
+        font-size: 19px;
+        line-height: 1.28;
+        font-weight: 850;
+        letter-spacing: -0.02em;
+        color: var(--gb-text);
+      }
+      .gb-next-action-meta {
+        margin: 6px 0 0;
+        font-size: 12.5px;
+        color: var(--gb-text-dim);
+      }
+      .gb-cta-button {
+        width: 100%;
+        margin-top: 16px;
+        min-height: 52px;
+        border: 0;
+        border-radius: 999px;
+        font-size: 15px;
+        font-weight: 800;
+        cursor: pointer;
+        background: linear-gradient(135deg, var(--gb-accent), color-mix(in srgb, var(--gb-accent) 70%, #ffd59a));
+        color: #080d16;
+        box-shadow: 0 10px 26px color-mix(in srgb, var(--gb-accent) 38%, transparent);
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      .gb-priority-chip {
+        font-size: 9.5px;
+        font-weight: 800;
+        padding: 2px 7px;
+        border-radius: 999px;
+        border: 1px solid currentColor;
+        opacity: 0.9;
+        white-space: nowrap;
+      }
+      .gb-task-row-flat {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--gb-border);
+      }
+      .gb-task-row-flat:last-child {
+        border-bottom: none;
+      }
+      .gb-task-group-label {
+        margin: 14px 0 6px;
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--gb-text-dim);
+      }
+      .gb-task-group-label:first-child {
+        margin-top: 0;
+      }
+      .gb-low-key-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        cursor: pointer;
+        width: 100%;
+        background: none;
+        border: none;
+        text-align: left;
+        color: inherit;
+      }
       .gb-card-header {
         display: flex;
         align-items: flex-start;
@@ -4145,6 +4272,116 @@
         .gb-recovery-primary,
         .gb-recovery-secondary { width: 100%; }
       }
+
+      /* ══════════════════════════════════════════════════════════════════
+         [UI-REDESIGN] MINIMAL PRO — override CSS scoped theo data-theme
+         Chỉ áp dụng khi theme active = "minimal_pro" (xem App(): effect
+         set document.documentElement.dataset.theme). KHÔNG đụng bất kỳ
+         rule/class nào ở trên — mọi theme khác (38 theme cũ) không có
+         [data-theme="minimal_pro"] nên hoàn toàn không bị ảnh hưởng.
+         Mục tiêu: bo góc 12–16px, shadow rất nhẹ, bỏ gradient nút, giảm
+         glow trang trí, transition 150–200ms — đúng brief SaaS tối giản.
+         ══════════════════════════════════════════════════════════════════ */
+      [data-theme="minimal_pro"] {
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 14px;
+        --radius-xl: 16px;
+        --gb-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+        --gb-shadow-md: 0 2px 8px rgba(16, 24, 40, 0.08);
+        --gb-shadow-lg: 0 4px 16px rgba(16, 24, 40, 0.1);
+        --gb-dur-fast: 150ms;
+        --gb-dur-base: 180ms;
+        --gb-dur-slow: 200ms;
+      }
+
+      /* Card: flat, viền mỏng, không nền chìm nổi */
+      [data-theme="minimal_pro"] .gb-card,
+      [data-theme="minimal_pro"] .gb-card-muted {
+        box-shadow: none;
+        border-color: var(--gb-border);
+      }
+      [data-theme="minimal_pro"] .gb-card-hover,
+      [data-theme="minimal_pro"] .gb-card-elevate {
+        transition: border-color 180ms var(--gb-ease, ease), box-shadow 180ms var(--gb-ease, ease);
+      }
+      [data-theme="minimal_pro"] .gb-card-hover:hover,
+      [data-theme="minimal_pro"] .gb-card-elevate:hover {
+        transform: none !important;
+        box-shadow: var(--gb-shadow-sm) !important;
+        border-color: color-mix(in srgb, var(--gb-accent) 32%, var(--gb-border));
+      }
+
+      /* Hero / Today card: bỏ gradient trang trí, dùng nền phẳng */
+      [data-theme="minimal_pro"] .gb-today-hero {
+        background: var(--gb-surface);
+        box-shadow: none;
+        border: 1px solid var(--gb-border);
+      }
+
+      /* Button: flat, không gradient, hover/transition nhẹ theo đúng brief */
+      [data-theme="minimal_pro"] .gb-button-primary {
+        background: var(--gb-accent);
+        box-shadow: none;
+        transition: background-color 150ms ease, opacity 150ms ease;
+      }
+      [data-theme="minimal_pro"] .gb-button-primary:hover {
+        background: color-mix(in srgb, var(--gb-accent) 88%, #000);
+      }
+      [data-theme="minimal_pro"] .gb-button-secondary {
+        background: transparent;
+        border: 1px solid var(--gb-border);
+        color: var(--gb-text);
+        transition: border-color 150ms ease, background-color 150ms ease;
+      }
+      [data-theme="minimal_pro"] .gb-button-secondary:hover {
+        background: var(--gb-surface-alt);
+        border-color: color-mix(in srgb, var(--gb-accent) 40%, var(--gb-border));
+      }
+      [data-theme="minimal_pro"] .gb-link-button,
+      [data-theme="minimal_pro"] .gb-more-button {
+        font-weight: 600;
+      }
+
+      /* Task row / list item: viền mỏng thay vì nền chìm nổi mạnh */
+      [data-theme="minimal_pro"] .gb-task-row {
+        background: var(--gb-surface);
+        transition: border-color 150ms ease, background-color 150ms ease;
+      }
+      [data-theme="minimal_pro"] .gb-task-row:hover {
+        background: var(--gb-surface-alt);
+      }
+
+      /* Modal: shadow nhẹ hơn nhiều so với mặc định */
+      [data-theme="minimal_pro"] .gb-modal-fade-scale {
+        box-shadow: var(--gb-shadow-lg);
+      }
+
+      /* Giảm hiệu ứng glow/pulse trang trí xuống rất nhẹ, giữ nguyên khả năng nhận biết trạng thái */
+      [data-theme="minimal_pro"] .gb-level-glow {
+        animation: none;
+      }
+      [data-theme="minimal_pro"] .gb-achievement-pop {
+        animation: gbAchPop 0.4s var(--gb-ease, ease) both;
+      }
+      [data-theme="minimal_pro"] .gb-ai-shimmer::after {
+        display: none;
+      }
+
+      /* FAB / bottom nav: bỏ glow, giữ contrast rõ bằng border mảnh */
+      [data-theme="minimal_pro"] .gb-fab-main {
+        box-shadow: var(--gb-shadow-md) !important;
+        border-color: var(--gb-border) !important;
+      }
+
+      /* Focus state: rõ ràng, đạt chuẩn a11y, dùng accent duy nhất */
+      [data-theme="minimal_pro"] input:focus-visible,
+      [data-theme="minimal_pro"] textarea:focus-visible,
+      [data-theme="minimal_pro"] select:focus-visible,
+      [data-theme="minimal_pro"] button:focus-visible {
+        outline: 2px solid var(--gb-accent) !important;
+        outline-offset: 2px;
+      }
     </style>
     <script>
       /* ======================================================================
@@ -5702,6 +5939,25 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
           spring: "cubic-bezier(0.34, 1.56, 0.64, 1)",
         },
         THEMES = {
+          claude: {
+            name: "Claude",
+            bg: "#F5F3EE",
+            surface: "#FFFFFF",
+            surfaceAlt: "#EDE9DE",
+            border: "#DDD6C7",
+            text: "#2B2823",
+            textDim: "#7A7468",
+            primary: "#C15F3C",
+            secondary: "#6B7280",
+            tertiary: "#E8E2D3",
+            neutral: "#A39A88",
+            accent: "#C15F3C",
+            accentSoft: "#C15F3C22",
+            accentBorder: "#C15F3C55",
+            danger: "#B3462F",
+            success: "#5C8A5C",
+            warning: "#C98A2E",
+          },
           /* ========================================================
              38 THEME GỐC — sắp xếp theo nhóm màu (dark trước, hue
              tăng dần theo primary: đỏ→cam→vàng→lục→lam→tím→hồng)
@@ -7860,6 +8116,32 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
             danger: "#ba372c",
             success: "#328551",
             warning: "#bb701b",
+          },
+          // [UI-REDESIGN] Minimal Pro — theme mới, KHÔNG sửa/xoá theme nào
+          // sẵn có. Phong cách SaaS tối giản kiểu Stripe/Linear/Vercel:
+          // nền trắng/xám trung tính, 1 accent duy nhất (blue), border
+          // mảnh, không glow/gradient loè loẹt. Cùng schema field với
+          // mọi theme khác nên tự động chạy đúng trong ThemeManager.apply,
+          // theme picker (Object.entries(THEMES)) và mọi component đọc
+          // theme qua ThemeContext — không cần đổi logic nơi khác.
+          minimal_pro: {
+            name: "Minimal Pro",
+            bg: "#FFFFFF",
+            surface: "#FAFAFA",
+            surfaceAlt: "#F4F4F5",
+            border: "#E4E4E7",
+            text: "#18181B",
+            textDim: "#71717A",
+            primary: "#2563EB",
+            secondary: "#52525B",
+            tertiary: "#F4F4F5",
+            neutral: "#A1A1AA",
+            accent: "#2563EB",
+            accentSoft: "#2563EB14",
+            accentBorder: "#2563EB40",
+            danger: "#DC2626",
+            success: "#16A34A",
+            warning: "#D97706",
           },
         },
         CATEGORY_COLORS = {
@@ -47435,6 +47717,11 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
               source: "react-theme",
             },
           );
+          // [UI-REDESIGN] Đồng bộ data-theme lên <html> — CHỈ để CSS scoped
+          // theo từng theme (vd. bo góc/shadow riêng cho Minimal Pro) có
+          // selector để bám vào. Không ảnh hưởng theme khác vì mọi theme
+          // cũ không có rule CSS nào đọc attribute này.
+          document.documentElement.setAttribute("data-theme", activeThemeKey);
         }, [activeTheme, accentColor, activeThemeKey]);
         const [dayDatabase, setDayDatabase] = useState({}),
           [appSettings, setAppSettings] = useState({
@@ -62364,14 +62651,11 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
         return React.createElement(
           "div",
           {
-            className: "gb-surface-card gb-card-hover",
-            style: {
-              background: a.surface,
-              borderRadius: 16,
-              padding: 14,
-              marginBottom: 12,
-              boxShadow: "0 6px 20px rgba(0,0,0,0.28)",
-            },
+            // [UX REFACTOR 2026-09] Doi tu box-shadow nang + style rieng
+            // sang dung token gb-card/gb-section-gap dung chung voi moi card
+            // khac trong tab Hom nay (giam shadow/thong nhat vien theo yeu
+            // cau redesign). Component nay chi dung o Today - an toan de doi.
+            className: "gb-card gb-card-hover gb-section-gap",
           },
           React.createElement(
             "div",
@@ -68829,6 +69113,16 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
                 },
               },
               item?.name || "Việc hôm nay",
+              // [UX REFACTOR 2026-09] timeLabel đã được tính sẵn ở trên
+              // (dòng khai báo const) nhưng trước đây chưa render ở đâu cả —
+              // bổ sung thuần hiển thị (additive-only), đúng yêu cầu "task
+              // cần có: checkbox, tên, deadline, priority".
+              timeLabel &&
+                React.createElement(
+                  "span",
+                  { style: { fontSize: 8, fontWeight: 700, color: theme.textDim } },
+                  "🕐 " + timeLabel,
+                ),
               item?.priority && "med" !== item.priority &&
                 React.createElement(
                   "span",
@@ -69184,6 +69478,16 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           { key: "personal", icon: "💼", label: "Công việc cá nhân", color: accent },
           { key: "flex", icon: "✨", label: "Linh hoạt", color: theme.secondary || accent },
         ];
+      }
+      // [UX REFACTOR 2026-09] Biến thể "phẳng" của getPlannerGroupsMeta,
+      // CHỈ dùng cho tab Hôm nay (TodayChecklistPreview) — cùng key/icon/
+      // label hệt như bản gốc (PlannerTaskGroupV7 vẫn nhận diện group đúng
+      // như cũ), chỉ thay 6 màu rực rỡ khác nhau bằng 1 tông trung tính duy
+      // nhất để giảm số màu/độ đậm của border-box theo yêu cầu redesign.
+      // Tab Lịch (AIPlannerTimelineCard...) vẫn gọi getPlannerGroupsMeta gốc
+      // ở trên — không đổi gì bên đó.
+      function getTodayGroupsMetaFlat(theme) {
+        return getPlannerGroupsMeta(theme, theme.textDim).map((g) => ({ ...g, color: theme.textDim }));
       }
       function AIPlannerTimelineCard({
         entry: entry,
@@ -74908,7 +75212,7 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
               defaultOpen: phase4Evening,
               subtitle: phase4Evening
                 ? "Buổi tối: chốt ngày — lưu trên máy, không gửi AI"
-                : "Mở khi cần review; dữ liệu không tự gửi AI",
+                : "Đến cuối ngày hãy review.",
               helpKey: "Timeline & Daily Review",
             },
             React.createElement(DailyTimelineReviewCard, {
@@ -75263,6 +75567,11 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           todaysGoalsCardProps: todaysGoalsCardProps,
         };
       }
+      // [UX REFACTOR 2026-09] Không còn được Today() gọi nữa — thay bằng
+      // TodayGreetingHero + TodayNextActionCard (tách Hero khỏi Next Action
+      // theo yêu cầu redesign toàn bộ IA tab Hôm nay). Giữ nguyên định nghĩa
+      // (không xoá) để archaeology-first/dễ rollback nếu cần — không có call
+      // site nào khác trong file dùng component này.
       const TodayHero = React.memo(function TodayHero({
         nextAction: nextAction,
         progress: progress,
@@ -75486,7 +75795,7 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           // key->original-item lookup so toggling still calls onToggleItem with
           // the real Today feed item (kind/id preserved) — scheduleDone/scheduleXp
           // routing is completely unchanged.
-          groupsMeta = useMemo(() => getPlannerGroupsMeta(theme, accent), [theme, accent]),
+          groupsMeta = useMemo(() => getTodayGroupsMetaFlat(theme), [theme]),
           scheduleDoneForRows = useMemo(
             () => Object.fromEntries((items || []).map((item) => [plannerTaskKeyV7(adaptFeedItemForPlannerRowV1(item)), !!item.done])),
             [items],
@@ -75823,6 +76132,10 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
             ),
         );
       });
+      // [UX REFACTOR 2026-09] Không còn được Today() gọi nữa — thay bằng
+      // TodayFocusCard (gộp Focus + Pomodoro làm 1; nút "Review" bỏ vì
+      // TodayReviewSectionV8 đã là 1 mục riêng ngay dưới). Giữ nguyên định
+      // nghĩa để dễ rollback — không có call site nào khác dùng component này.
       const TodayQuickActions = React.memo(function TodayQuickActions({
         studyRunning: studyRunning,
         studySecs: studySecs,
@@ -75870,6 +76183,11 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           ),
         );
       });
+      // [UX REFACTOR 2026-09] Không còn được Today() gọi nữa — thay bằng 3
+      // lời gọi trực tiếp trong Today() (StatsSummaryCard, TodayHealthCard,
+      // Finance Section) để kiểm soát đúng thứ tự IA mới (Statistics → Health
+      // → Finance, đẩy xuống cuối màn hình). Giữ nguyên định nghĩa để dễ
+      // rollback — không có call site nào khác dùng component này.
       const TodaySecondaryPanels = React.memo(function TodaySecondaryPanels({
         td: td,
         data: data,
@@ -78843,6 +79161,294 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
         );
       }
 
+      /* ======================================================================
+         UX REFACTOR 2026-09 — TODAY V2 COMPONENTS
+         Tách Hero khỏi Next Action, gộp Focus+Pomodoro, gộp Health, và ẩn
+         mặc định Phone Usage — theo yêu cầu redesign toàn bộ IA tab Hôm nay.
+         Additive-only: không đụng useTodayModel/onToggleFeedItem/scheduleDone
+         hay bất kỳ luồng lưu dữ liệu nào đã có ở trên. Chỉ là lớp trình bày
+         mới, đọc cùng props/model đã tồn tại.
+         ====================================================================== */
+      const TodayGreetingHero = React.memo(function TodayGreetingHero({
+        td: td,
+        str: str,
+        xpProgress: xpProgress,
+        doneCount: doneCount,
+        totalCount: totalCount,
+        progress: progress,
+      }) {
+        const accent = useContext(AccentContext),
+          now = new Date(),
+          hour = now.getHours(),
+          greeting = hour < 12 ? "Chào buổi sáng" : hour < 18 ? "Chào buổi chiều" : "Chào buổi tối",
+          dateObj = td ? new Date(td + "T00:00:00") : now,
+          dowNames = ["Chủ nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"],
+          dateLabel = `${dowNames[dateObj.getDay()]}, ${dateObj.getDate()} tháng ${dateObj.getMonth() + 1}`,
+          pct = Math.max(0, Math.min(100, Number(progress) || 0));
+        return React.createElement(
+          "section",
+          {
+            className: "gb-card gb-today-hero gb-section-gap gb-fade-in",
+            style: { "--gb-accent": accent, borderColor: `${accent}44` },
+          },
+          React.createElement("div", { className: "gb-kicker" }, `${greeting}, Bảo`),
+          React.createElement("h1", { className: "gb-today-date" }, dateLabel),
+          React.createElement(
+            "div",
+            { className: "gb-hero-stats-row" },
+            React.createElement(
+              "div",
+              { className: "gb-hero-stat-chip" },
+              React.createElement("span", { className: "gb-hero-stat-chip-label" }, "🔥 Streak"),
+              React.createElement("span", { className: "gb-hero-stat-chip-value" }, `${str || 0} ngày`),
+            ),
+            React.createElement(
+              "div",
+              { className: "gb-hero-stat-chip" },
+              React.createElement("span", { className: "gb-hero-stat-chip-label" }, "⭐ XP"),
+              React.createElement("span", { className: "gb-hero-stat-chip-value" }, `${xpProgress?.current ?? 0}/${xpProgress?.target ?? 0}`),
+            ),
+            React.createElement(
+              "div",
+              { className: "gb-hero-stat-chip" },
+              React.createElement("span", { className: "gb-hero-stat-chip-label" }, "✅ Hoàn thành"),
+              React.createElement("span", { className: "gb-hero-stat-chip-value" }, `${doneCount || 0}/${totalCount || 0}`),
+            ),
+          ),
+          React.createElement(
+            "div",
+            { className: "gb-progress-track", style: { "--gb-progress": `${pct}%` } },
+            React.createElement("div", { className: "gb-progress-fill" }),
+          ),
+        );
+      });
+      const TodayNextActionCard = React.memo(function TodayNextActionCard({
+        nextAction: nextAction,
+        studyRunning: studyRunning,
+        studySecs: studySecs,
+        onStart: onStart,
+        onOpenGoals: onOpenGoals,
+      }) {
+        if (!nextAction) {
+          return React.createElement(
+            "section",
+            { className: "gb-card gb-section-gap" },
+            React.createElement("div", { className: "gb-kicker" }, "Việc tiếp theo"),
+            React.createElement("h2", { className: "gb-next-action-title" }, "Chưa có việc nào được chọn"),
+            React.createElement("p", { className: "gb-next-action-meta" }, "Chọn một việc đủ nhỏ để bắt đầu ngay."),
+            React.createElement(
+              "button",
+              { type: "button", className: "gb-cta-button gb-ripple", onMouseDown: gbRipple, onClick: onOpenGoals },
+              "Chọn việc",
+            ),
+          );
+        }
+        const priority = String(nextAction.priority || nextAction.source?.priority || "med").toLowerCase(),
+          priorityLabel = "high" === priority || "urgent" === priority ? "Ưu tiên cao" : "low" === priority ? "Nhẹ" : null,
+          priorityColor = aiPlannerPriorityClass(priority),
+          timeText = nextAction.time?.start
+            ? `${nextAction.time.start}${nextAction.time.end ? "–" + nextAction.time.end : ""}`
+            : null,
+          kindLabel =
+            "goal" === nextAction.kind
+              ? "Mục tiêu chính"
+              : "custom" === nextAction.kind
+                ? "Việc lặp"
+                : "planner" === nextAction.kind
+                  ? "AI gợi ý"
+                  : "Nhiệm vụ",
+          metaParts = [kindLabel, timeText, nextAction.xp ? `+${nextAction.xp} XP` : null].filter(Boolean);
+        return React.createElement(
+          "section",
+          { className: "gb-card gb-section-gap" },
+          React.createElement(
+            "div",
+            { className: "gb-next-action-kicker" },
+            React.createElement(
+              "span",
+              { className: "gb-kicker" },
+              studyRunning ? `Đang Focus · ${fmtHM(studySecs || 0)}` : "Việc tiếp theo",
+            ),
+            priorityLabel &&
+              React.createElement("span", { className: "gb-priority-chip", style: { color: priorityColor } }, priorityLabel),
+          ),
+          React.createElement("h2", { className: "gb-next-action-title" }, nextAction.label),
+          !!metaParts.length && React.createElement("p", { className: "gb-next-action-meta" }, metaParts.join(" · ")),
+          React.createElement(
+            "button",
+            { type: "button", className: "gb-cta-button gb-ripple", onMouseDown: gbRipple, onClick: onStart },
+            studyRunning ? "Đang Focus…" : "Bắt đầu",
+          ),
+        );
+      });
+      const TodayFocusCard = React.memo(function TodayFocusCard({
+        studyRunning: studyRunning,
+        studySecs: studySecs,
+        startStudy: startStudy,
+        stopStudy: stopStudy,
+        onOpenPomodoro: onOpenPomodoro,
+      }) {
+        const theme = useContext(ThemeContext);
+        return React.createElement(
+          "section",
+          { className: "gb-card gb-card-sm gb-section-gap" },
+          React.createElement(
+            "div",
+            { className: "gb-focus-status-row" },
+            React.createElement(
+              "div",
+              null,
+              React.createElement("div", { className: "gb-kicker" }, "Focus"),
+              React.createElement(
+                "div",
+                { style: { fontSize: 15, fontWeight: 800, color: theme.text, marginTop: 3 } },
+                studyRunning ? `Đang chạy · ${fmtHM(studySecs || 0)}` : "Sẵn sàng tập trung",
+              ),
+            ),
+            studyRunning
+              ? React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "gb-button-secondary gb-ripple",
+                    onMouseDown: gbRipple,
+                    onClick: stopStudy,
+                    style: { minHeight: 40, padding: "0 16px" },
+                  },
+                  "Dừng",
+                )
+              : React.createElement(
+                  "div",
+                  { style: { display: "flex", gap: 8, flexShrink: 0 } },
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "gb-button-primary gb-ripple",
+                      onMouseDown: gbRipple,
+                      onClick: startStudy,
+                      style: { minHeight: 40, padding: "0 16px" },
+                    },
+                    "Bắt đầu",
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "gb-button-secondary gb-ripple",
+                      onMouseDown: gbRipple,
+                      onClick: onOpenPomodoro,
+                      style: { minHeight: 40, padding: "0 16px" },
+                    },
+                    "Pomodoro",
+                  ),
+                ),
+          ),
+        );
+      });
+      function TodayHealthCard({ td: td, data: data, save: save, theme: theme, accent: accent, onSwitchTab: onSwitchTab }) {
+        return React.createElement(
+          Section,
+          {
+            title: "Sức khỏe",
+            icon: "💪",
+            theme: theme,
+            defaultOpen: !0,
+            subtitle: "Mood, ngủ, vận động, nước — chỉ mất 15 giây",
+            helpKey: "Sức khỏe & Thói quen",
+          },
+          React.createElement(
+            "div",
+            { className: "gb-today-secondary-link-row" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                onClick: () => {
+                  requestSettingsHubGroup("daily");
+                  onSwitchTab?.(12);
+                },
+                className: "gb-link-button",
+                style: { color: theme.textDim },
+              },
+              "⚙️ Mở trong Cài đặt",
+            ),
+          ),
+          React.createElement(MoodPicker, {
+            data: data,
+            onSave: (mood) => save(td, { mood: mood }),
+          }),
+          React.createElement(
+            "div",
+            { className: "gb-grid-2", style: { marginTop: 8 } },
+            [
+              { id: "sleep", icon: "🌙", label: "Ngủ đủ" },
+              { id: "exercise", icon: "🏃", label: "Vận động" },
+              { id: "water", icon: "💧", label: "Uống nước" },
+              { id: "swim", icon: "🏊", label: "Bơi/TT" },
+            ].map((item) => {
+              const done = !!data.tasks?.[item.id];
+              return React.createElement(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  className: "gb-quick-action-button",
+                  style: {
+                    borderColor: done ? `${theme.success}66` : theme.border,
+                    background: done ? `${theme.success}18` : theme.surfaceAlt,
+                    color: done ? theme.success : theme.text,
+                  },
+                  onClick: () => {
+                    done || playSound("tick");
+                    save(td, { tasks: { [item.id]: !done } });
+                  },
+                },
+                item.icon,
+                " ",
+                item.label,
+              );
+            }),
+          ),
+          React.createElement(
+            "div",
+            { style: { fontSize: 10, color: theme.textDim, marginTop: 10, padding: "6px 2px" } },
+            "📱 Thời gian điện thoại/mở khoá giờ lấy tự động từ mục \"Điện thoại\" bên dưới khi bạn nhập dữ liệu ở đó — không cần nhập lại ở đây.",
+          ),
+        );
+      }
+      // [PHONE-USAGE-COLLAPSED] Ẩn mặc định — chỉ 1 dòng tiêu đề, DigitalActivityCard
+      // (component gốc, không đổi bên trong) chỉ mount khi bấm mở.
+      function TodayPhoneUsageCollapsed({ theme: theme, accent: accent, todayIso: todayIso, onOpenEntry: onOpenEntry, onOpenHistory: onOpenHistory }) {
+        const [open, setOpen] = useState(!1);
+        return React.createElement(
+          "section",
+          { className: "gb-card gb-card-sm gb-section-gap" },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "gb-low-key-row",
+              onClick: () => setOpen((v) => !v),
+              "aria-expanded": open,
+            },
+            React.createElement("span", { style: { fontSize: 12.5, fontWeight: 700, color: theme.text } }, "📱 Điện thoại"),
+            React.createElement("span", { style: { fontSize: 14, color: theme.textDim } }, open ? "▴" : "▾"),
+          ),
+          open &&
+            React.createElement(
+              "div",
+              { style: { marginTop: 10 } },
+              React.createElement(DigitalActivityCard, {
+                theme: theme,
+                accent: accent,
+                todayIso: todayIso,
+                onOpenEntry: onOpenEntry,
+                onOpenHistory: onOpenHistory,
+              }),
+            ),
+        );
+      }
       function Today(props) {
         const theme = useContext(ThemeContext),
           accent = useContext(AccentContext),
@@ -78894,10 +79500,9 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
             doneCount: model.doneCount,
             totalCount: model.totalCount,
           }),
-          onOpenReview = useCallback(
-            () => document.getElementById("phase3-daily-review-card")?.scrollIntoView({ behavior: "smooth", block: "start" }),
-            [],
-          ),
+          // [UX REFACTOR 2026-09] onOpenReview (scroll-to-review) không còn
+          // dùng — TodayQuickActions (nơi duy nhất gọi nó) đã bị thay bằng
+          // TodayFocusCard, không còn nút "Review" tắt riêng nữa.
           onToggleFeedItem = useCallback(
             (item) => {
               if (!item) return;
@@ -79074,14 +79679,19 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
             overload: dailyIntel.overload,
             theme: theme,
           }),
-          React.createElement(TodayHero, {
-            nextAction: model.nextAction,
-            progress: model.progress,
+          React.createElement(TodayGreetingHero, {
+            td: props.td,
+            str: props.str,
+            xpProgress: model.xpProgress,
             doneCount: model.doneCount,
             totalCount: model.totalCount,
+            progress: model.progress,
+          }),
+          React.createElement(TodayNextActionCard, {
+            nextAction: model.nextAction,
             studyRunning: props.studyRunning,
             studySecs: props.studySecs,
-            onOpenPomodoro: props.onOpenPomodoro,
+            onStart: model.nextAction ? props.onOpenPomodoro : openGoals,
             onOpenGoals: openGoals,
           }),
           // PR-DQC-01: Daily Quick Capture — additive sibling ngay dưới Hero,
@@ -79121,7 +79731,7 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
           // PHASE 17 — Study Progress Intelligence, Part 2: prompt cập nhật
           // mastery nhanh, chỉ render khi studyProgressPrompt !== null (sau
           // khi vừa tick xong 1 task học tập). additive sibling — không thay
-          // thế/đổi props của TodayChecklistPreview hay TodayQuickActions.
+          // thế/đổi props của TodayChecklistPreview hay TodayFocusCard.
           studyProgressPrompt &&
             React.createElement(StudyProgressQuickUpdate, {
               key: studyProgressPrompt.key,
@@ -79130,13 +79740,15 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
               accent: accent,
               onClose: () => setStudyProgressPrompt(null),
             }),
-          React.createElement(TodayQuickActions, {
+          // [UX REFACTOR 2026-09] Focus card gộp Focus + Pomodoro làm 1 —
+          // nút "Review" cũ đã bỏ khỏi đây vì Daily Review giờ là 1 mục
+          // riêng ngay dưới (TodayReviewSectionV8), không cần lối tắt trùng.
+          React.createElement(TodayFocusCard, {
             studyRunning: props.studyRunning,
             studySecs: props.studySecs,
             startStudy: props.startStudy,
             stopStudy: props.stopStudy,
             onOpenPomodoro: props.onOpenPomodoro,
-            onOpenReview: onOpenReview,
           }),
           React.createElement(TodayReviewSectionV8, {
             phase4Evening: phaseEvening,
@@ -79158,14 +79770,43 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
               review: dailyIntel.eveningReview,
               theme: theme,
             }),
-          React.createElement(TodaySecondaryPanels, {
-            ...props,
+          // [UX REFACTOR 2026-09] Thống kê — Sức khỏe — Tài chính — Điện
+          // thoại giờ gọi trực tiếp thay vì qua TodaySecondaryPanels, để
+          // kiểm soát đúng thứ tự IA đã thống nhất (Statistics → Health →
+          // Finance → Phone, tất cả đẩy xuống cuối, ít nổi bật hơn Hero/
+          // Next Action/Tasks/Focus/Review ở trên).
+          React.createElement(StatsSummaryCard, { td: props.td, db: props.db, str: props.str }),
+          React.createElement(TodayHealthCard, {
+            td: props.td,
+            data: props.data,
+            save: props.save,
             theme: theme,
             accent: accent,
+            onSwitchTab: props.onSwitchTab,
           }),
+          React.createElement(
+            "div",
+            { id: "gb-today-finance-section" },
+            React.createElement(
+              Section,
+              {
+                title: "Tài chính",
+                icon: "💸",
+                theme: theme,
+                defaultOpen: !1,
+                subtitle: "Nhập nhanh tiền chi ra trong ngày",
+                helpKey: "Tài chính",
+              },
+              React.createElement(TodayFinanceQuickExpense, {
+                td: props.td,
+                finTxs: props.finTxs,
+                setFinTxs: props.setFinTxs,
+              }),
+            ),
+          ),
           // [MOVE-KHO-TRASH-TO-AI] 2 nút "Kho việc cá nhân"/"Thùng rác" đã
           // chuyển sang cuối tab AI theo yêu cầu Bảo — xem TimelineFullScreen.
-          React.createElement(DigitalActivityCard, {
+          React.createElement(TodayPhoneUsageCollapsed, {
             theme: theme,
             accent: accent,
             todayIso: props.td || toISO(),
@@ -84649,12 +85290,29 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
               l: e.text,
               done: !!e.done,
             })),
-            ...Object.entries(data.timelineDone || {}).map(([e, t]) => ({
-              key: "tl_" + e,
-              i: "🤖",
-              l: e.split("|").slice(1).join("|") || e,
-              done: !!t,
-            })),
+            // [FIX 2026-09] scheduleDone là nguồn thật hiện tại (ghi bởi
+            // plannerTaskKeyV7 -> "task|<tên task>"). timelineDone là field
+            // legacy không còn nơi nào ghi nữa, nhưng vẫn giữ để không mất
+            // checklist của những ngày cũ. Merge 2 nguồn, scheduleDone đè lên
+            // khi trùng key; parse label an toàn để không bao giờ render
+            // dòng rỗng.
+            ...Object.entries({
+              ...(data.timelineDone || {}),
+              ...(data.scheduleDone || {}),
+            }).map(([e, t]) => {
+              const label = e.startsWith("task|")
+                  ? e.slice(5)
+                  : e.includes("|")
+                    ? e.split("|").slice(1).join("|")
+                    : e,
+                text = (label || "").trim() || e;
+              return {
+                key: "tl_" + e,
+                i: "🤖",
+                l: text,
+                done: !!t,
+              };
+            }),
           ],
           C = T.filter((e) => e.done).length,
           w = avgMood(data);
@@ -85073,10 +85731,15 @@ html.gb-performance-mode #root.gb-motion-sync-enabled .gb-day-expand {
                           bigGoalsToday: i,
                         });
                       } else if (a.key.startsWith("tl_")) {
+                        // [FIX 2026-09] Toggle luôn ghi vào scheduleDone (nguồn
+                        // hiện tại) thay vì timelineDone (legacy, không còn ai
+                        // đọc/ghi). Task legacy chỉ có trong timelineDone sẽ
+                        // được migrate sang scheduleDone ngay lần tick đầu
+                        // tiên; không ghi ngược lại timelineDone nữa.
                         const r = a.key.slice(3);
                         save(date, {
-                          timelineDone: {
-                            ...(data.timelineDone || {}),
+                          scheduleDone: {
+                            ...(data.scheduleDone || {}),
                             [r]: !o,
                           },
                         });
